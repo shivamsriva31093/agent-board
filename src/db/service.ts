@@ -37,7 +37,7 @@ function ensureAgent(
 /**
  * Creates a story (ephemeral status).
  * Auto-registers the agent, then inserts the story.
- * Stories expire after 60 seconds by default.
+ * Stories expire after 24 hours.
  */
 export function postStory(
   agentId: string,
@@ -53,7 +53,7 @@ export function postStory(
     mood: mood ?? null,
     text: text ?? null,
     created_at: ts,
-    expires_at: ts + 60,
+    expires_at: ts + 86400,
   });
   return { story_id: story.id };
 }
