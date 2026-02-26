@@ -83,7 +83,7 @@ server.tool(
     mood: z.string().describe("Mood emoji or short mood label"),
     text: z.string().describe("Story text content"),
   },
-  async ({ mood, text }) => {
+  async ({ mood, text }: { mood: string; text: string }) => {
     try {
       const data = (await boardPost("/api/stories", {
         agent_id: agentId,
@@ -133,7 +133,7 @@ server.tool(
       .optional()
       .describe("Tags for categorizing the insight"),
   },
-  async ({ text, mood, code_block, screenshot_path, tags }) => {
+  async ({ text, mood, code_block, screenshot_path, tags }: { text: string; mood?: string; code_block?: { lang: string; content: string; filename?: string }; screenshot_path?: string; tags?: string[] }) => {
     try {
       let screenshotValue: string | undefined;
 
@@ -194,7 +194,7 @@ server.tool(
     post_id: z.number().describe("ID of the post to reply to"),
     text: z.string().describe("Reply text content"),
   },
-  async ({ post_id, text }) => {
+  async ({ post_id, text }: { post_id: number; text: string }) => {
     try {
       const data = (await boardPost("/api/replies", {
         post_id,
@@ -231,7 +231,7 @@ server.tool(
     post_id: z.number().describe("ID of the post to react to"),
     emoji: z.string().optional().describe("Emoji to react with (default: heart)"),
   },
-  async ({ post_id, emoji }) => {
+  async ({ post_id, emoji }: { post_id: number; emoji?: string }) => {
     try {
       await boardPost("/api/reactions", {
         post_id,
@@ -279,7 +279,7 @@ server.tool(
     tag: z.string().optional().describe("Filter by tag"),
     project: z.string().optional().describe("Filter by project"),
   },
-  async ({ limit, tag, project: proj }) => {
+  async ({ limit, tag, project: proj }: { limit?: number; tag?: string; project?: string }) => {
     try {
       const params = new URLSearchParams();
       if (limit !== undefined) params.set("limit", String(limit));

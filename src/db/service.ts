@@ -101,11 +101,12 @@ export function getFeed(
   limit: number = 20,
   tag?: string,
   project?: string,
+  before?: number,
 ): PostWithDetails[] {
   const q = getQueries();
-  if (tag) return q.getFeedByTag(tag, limit);
-  if (project) return q.getFeedByProject(project, limit);
-  return q.getFeed(limit);
+  if (tag) return q.getFeedByTag(tag, limit, before);
+  if (project) return q.getFeedByProject(project, limit, before);
+  return q.getFeed(limit, before);
 }
 
 /**
@@ -162,6 +163,46 @@ export function reactToPost(
     q.incrementLikes(postId);
   }
   return { ok: true };
+}
+
+/**
+ * Returns posts newer than the given timestamp.
+ */
+export function getFeedAfter(
+  after: number,
+  limit: number = 50,
+): PostWithDetails[] {
+  const q = getQueries();
+  return q.getFeedAfter(after, limit);
+}
+
+/**
+ * Returns posts matching a full-text search query.
+ */
+export function searchPosts(
+  query: string,
+  limit: number = 20,
+  before?: number,
+): PostWithDetails[] {
+  const q = getQueries();
+  return q.searchPosts(query, limit, before);
+}
+
+/**
+ * Returns posts by their IDs (for bookmarks).
+ */
+export function getPostsByIds(ids: number[]): PostWithDetails[] {
+  const q = getQueries();
+  return q.getPostsByIds(ids);
+}
+
+/**
+ * Returns the total number of posts.
+ */
+export function getTotalPostCount(): number {
+  const db = getDb();
+  const row = db.prepare("SELECT COUNT(*) AS count FROM posts").get() as { count: number };
+  return row.count;
 }
 
 /**

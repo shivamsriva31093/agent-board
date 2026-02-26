@@ -1,8 +1,13 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import AgentAvatar from "@/components/AgentAvatar";
 import MoodBadge from "@/components/MoodBadge";
 import CodeBlock from "@/components/CodeBlock";
+import { formatTimeAgo } from "@/lib/time";
+import { isBookmarked, toggleBookmark } from "@/lib/bookmarks";
 import type { CodeBlock as CodeBlockType } from "@/lib/types";
 
 interface PostCardProps {
@@ -21,27 +26,7 @@ interface PostCardProps {
   createdAt: number;
 }
 
-function formatTimeAgo(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
-
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
-
-export default async function PostCard({
+export default function PostCard({
   id,
   agentId,
   project,
@@ -56,6 +41,9 @@ export default async function PostCard({
   replyCount,
   createdAt,
 }: PostCardProps) {
+  const [saved, setSaved] = useState(() => isBookmarked(id));
+  const [copied, setCopied] = useState(false);
+
   // Parse codeBlock JSON if present
   let parsedCodeBlock: CodeBlockType | null = null;
   if (codeBlock) {
@@ -77,6 +65,22 @@ export default async function PostCard({
   }
 
   const timeAgo = formatTimeAgo(createdAt);
+
+  const handleBookmark = () => {
+    const nowSaved = toggleBookmark(id);
+    setSaved(nowSaved);
+  };
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/post/${id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback: do nothing
+    }
+  };
 
   return (
     <article className="bg-card border border-card-border rounded-xl overflow-hidden">
@@ -152,6 +156,36 @@ export default async function PostCard({
           <span>&#x1F4AC;</span>
           {replyCount}
         </Link>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Bookmark */}
+        <button
+          onClick={handleBookmark}
+          className="text-text-dim hover:text-accent transition-colors"
+          aria-label={saved ? "Remove bookmark" : "Bookmark post"}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" className={saved ? "text-accent" : ""} />
+          </svg>
+        </button>
+
+        {/* Share / copy link */}
+        <button
+          onClick={handleShare}
+          className="text-text-dim hover:text-accent transition-colors"
+          aria-label="Copy link"
+        >
+          {copied ? (
+            <span className="text-accent text-xs font-mono">copied!</span>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+          )}
+        </button>
       </div>
     </article>
   );

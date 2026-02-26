@@ -23,9 +23,12 @@ export interface Queries {
   // Posts
   insertPost(post: Omit<Post, "id" | "likes">): Post;
   getPost(id: number): PostWithDetails | undefined;
-  getFeed(limit?: number): PostWithDetails[];
-  getFeedByTag(tag: string, limit?: number): PostWithDetails[];
-  getFeedByProject(project: string, limit?: number): PostWithDetails[];
+  getPostsByIds(ids: number[]): PostWithDetails[];
+  getFeed(limit?: number, before?: number): PostWithDetails[];
+  getFeedAfter(after: number, limit?: number): PostWithDetails[];
+  getFeedByTag(tag: string, limit?: number, before?: number): PostWithDetails[];
+  getFeedByProject(project: string, limit?: number, before?: number): PostWithDetails[];
+  searchPosts(query: string, limit?: number, before?: number): PostWithDetails[];
 
   // Replies
   insertReply(reply: Omit<Reply, "id">): Reply;
@@ -184,6 +187,16 @@ export function createQueries(db: Database.Database): Queries {
     LIMIT ?
   `);
 
+  const stmtGetFeedBefore = db.prepare(`
+    SELECT p.*, a.id AS a_id, a.project AS a_project,
+           a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
+           a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
+    FROM posts p JOIN agents a ON p.agent_id = a.id
+    WHERE p.created_at < ?
+    ORDER BY p.created_at DESC
+    LIMIT ?
+  `);
+
   const stmtGetFeedByTag = db.prepare(`
     SELECT p.*, a.id AS a_id, a.project AS a_project,
            a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
@@ -194,12 +207,42 @@ export function createQueries(db: Database.Database): Queries {
     LIMIT ?
   `);
 
+  const stmtGetFeedByTagBefore = db.prepare(`
+    SELECT p.*, a.id AS a_id, a.project AS a_project,
+           a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
+           a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
+    FROM posts p JOIN agents a ON p.agent_id = a.id
+    WHERE p.tags LIKE ? AND p.created_at < ?
+    ORDER BY p.created_at DESC
+    LIMIT ?
+  `);
+
   const stmtGetFeedByProject = db.prepare(`
     SELECT p.*, a.id AS a_id, a.project AS a_project,
            a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
            a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
     FROM posts p JOIN agents a ON p.agent_id = a.id
     WHERE a.project = ?
+    ORDER BY p.created_at DESC
+    LIMIT ?
+  `);
+
+  const stmtGetFeedByProjectBefore = db.prepare(`
+    SELECT p.*, a.id AS a_id, a.project AS a_project,
+           a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
+           a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
+    FROM posts p JOIN agents a ON p.agent_id = a.id
+    WHERE a.project = ? AND p.created_at < ?
+    ORDER BY p.created_at DESC
+    LIMIT ?
+  `);
+
+  const stmtGetFeedAfter = db.prepare(`
+    SELECT p.*, a.id AS a_id, a.project AS a_project,
+           a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
+           a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
+    FROM posts p JOIN agents a ON p.agent_id = a.id
+    WHERE p.created_at > ?
     ORDER BY p.created_at DESC
     LIMIT ?
   `);
@@ -314,40 +357,106 @@ export function createQueries(db: Database.Database): Queries {
       return hydratePost(db, row);
     },
 
-    getFeed(limit = 50) {
-      const rows = stmtGetFeed.all(limit) as (Post & {
+    getPostsByIds(ids) {
+      if (ids.length === 0) return [];
+      const placeholders = ids.map(() => "?").join(",");
+      const stmt = db.prepare(`
+        SELECT p.*, a.id AS a_id, a.project AS a_project,
+               a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
+               a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
+        FROM posts p JOIN agents a ON p.agent_id = a.id
+        WHERE p.id IN (${placeholders})
+        ORDER BY p.created_at DESC
+      `);
+      type PostRow = Post & {
+        a_id: string; a_project: string; a_agent_type: string | null;
+        a_avatar_seed: string; a_first_seen: number; a_last_seen: number;
+      };
+      const rows = stmt.all(...ids) as PostRow[];
+      return rows.map((r) => hydratePost(db, r));
+    },
+
+    getFeed(limit = 50, before) {
+      type PostRow = Post & {
         a_id: string;
         a_project: string;
         a_agent_type: string | null;
         a_avatar_seed: string;
         a_first_seen: number;
         a_last_seen: number;
-      })[];
+      };
+      const rows = before
+        ? (stmtGetFeedBefore.all(before, limit) as PostRow[])
+        : (stmtGetFeed.all(limit) as PostRow[]);
       return rows.map((r) => hydratePost(db, r));
     },
 
-    getFeedByTag(tag, limit = 50) {
+    getFeedByTag(tag, limit = 50, before) {
+      type PostRow = Post & {
+        a_id: string;
+        a_project: string;
+        a_agent_type: string | null;
+        a_avatar_seed: string;
+        a_first_seen: number;
+        a_last_seen: number;
+      };
       const pattern = `%"${tag}"%`;
-      const rows = stmtGetFeedByTag.all(pattern, limit) as (Post & {
-        a_id: string;
-        a_project: string;
-        a_agent_type: string | null;
-        a_avatar_seed: string;
-        a_first_seen: number;
-        a_last_seen: number;
-      })[];
+      const rows = before
+        ? (stmtGetFeedByTagBefore.all(pattern, before, limit) as PostRow[])
+        : (stmtGetFeedByTag.all(pattern, limit) as PostRow[]);
       return rows.map((r) => hydratePost(db, r));
     },
 
-    getFeedByProject(project, limit = 50) {
-      const rows = stmtGetFeedByProject.all(project, limit) as (Post & {
+    getFeedByProject(project, limit = 50, before) {
+      type PostRow = Post & {
         a_id: string;
         a_project: string;
         a_agent_type: string | null;
         a_avatar_seed: string;
         a_first_seen: number;
         a_last_seen: number;
-      })[];
+      };
+      const rows = before
+        ? (stmtGetFeedByProjectBefore.all(project, before, limit) as PostRow[])
+        : (stmtGetFeedByProject.all(project, limit) as PostRow[]);
+      return rows.map((r) => hydratePost(db, r));
+    },
+
+    getFeedAfter(after, limit = 50) {
+      type PostRow = Post & {
+        a_id: string; a_project: string; a_agent_type: string | null;
+        a_avatar_seed: string; a_first_seen: number; a_last_seen: number;
+      };
+      const rows = stmtGetFeedAfter.all(after, limit) as PostRow[];
+      return rows.map((r) => hydratePost(db, r));
+    },
+
+    searchPosts(query, limit = 50, before) {
+      type PostRow = Post & {
+        a_id: string; a_project: string; a_agent_type: string | null;
+        a_avatar_seed: string; a_first_seen: number; a_last_seen: number;
+      };
+      const sql = before
+        ? `SELECT p.*, a.id AS a_id, a.project AS a_project,
+                  a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
+                  a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
+           FROM posts_fts fts
+           JOIN posts p ON p.id = fts.rowid
+           JOIN agents a ON p.agent_id = a.id
+           WHERE posts_fts MATCH ? AND p.created_at < ?
+           ORDER BY p.created_at DESC LIMIT ?`
+        : `SELECT p.*, a.id AS a_id, a.project AS a_project,
+                  a.agent_type AS a_agent_type, a.avatar_seed AS a_avatar_seed,
+                  a.first_seen AS a_first_seen, a.last_seen AS a_last_seen
+           FROM posts_fts fts
+           JOIN posts p ON p.id = fts.rowid
+           JOIN agents a ON p.agent_id = a.id
+           WHERE posts_fts MATCH ?
+           ORDER BY p.created_at DESC LIMIT ?`;
+      const stmt = db.prepare(sql);
+      const rows = before
+        ? (stmt.all(query, before, limit) as PostRow[])
+        : (stmt.all(query, limit) as PostRow[]);
       return rows.map((r) => hydratePost(db, r));
     },
 

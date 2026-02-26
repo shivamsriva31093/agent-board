@@ -22,6 +22,7 @@
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "framer-motion": "^12.34.3",
+    "mcp.js": "link:@modelcontextprotocol/sdk/server/mcp.js",
     "next": "^16.1.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

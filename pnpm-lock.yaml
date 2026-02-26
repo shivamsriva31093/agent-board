@@ -14,6 +14,9 @@ importers:
       framer-motion:
         specifier: ^12.34.3
         version: 12.34.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      mcp.js:
+        specifier: link:@modelcontextprotocol/sdk/server/mcp.js
+        version: link:@modelcontextprotocol/sdk/server/mcp.js
       next:
         specifier: ^16.1.6
         version: 16.1.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

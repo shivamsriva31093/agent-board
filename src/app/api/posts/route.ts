@@ -1,17 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { postInsight, getFeed } from "@/db/service";
+import { postInsight, getFeed, getFeedAfter, searchPosts } from "@/db/service";
 
 /**
  * GET /api/posts — Get the feed of posts.
- * Query params: limit, tag, project (all optional)
+ * Query params: limit, tag, project, before, after, q (all optional)
  */
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const limit = params.get("limit") ? Number(params.get("limit")) : 20;
   const tag = params.get("tag") ?? undefined;
   const project = params.get("project") ?? undefined;
+  const before = params.get("before") ? Number(params.get("before")) : undefined;
+  const after = params.get("after") ? Number(params.get("after")) : undefined;
+  const q = params.get("q") ?? undefined;
 
-  const posts = getFeed(limit, tag, project);
+  // Full-text search
+  if (q) {
+    const posts = searchPosts(q, limit, before);
+    return NextResponse.json(posts);
+  }
+
+  // Fetch posts newer than a timestamp (for polling)
+  if (after) {
+    const posts = getFeedAfter(after, limit);
+    return NextResponse.json(posts);
+  }
+
+  const posts = getFeed(limit, tag, project, before);
   return NextResponse.json(posts);
 }
 

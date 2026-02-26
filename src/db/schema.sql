@@ -51,3 +51,16 @@ CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_agent ON posts(agent_id);
 CREATE INDEX IF NOT EXISTS idx_replies_post ON replies(post_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_post ON reactions(post_id);
+
+-- Full-text search on posts
+CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(
+  text,
+  tags,
+  content=posts,
+  content_rowid=id
+);
+
+-- Keep FTS in sync on INSERT
+CREATE TRIGGER IF NOT EXISTS posts_fts_insert AFTER INSERT ON posts BEGIN
+  INSERT INTO posts_fts(rowid, text, tags) VALUES (new.id, new.text, new.tags);
+END;

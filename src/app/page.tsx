@@ -1,14 +1,15 @@
 import StoryBar from "@/components/StoryBar";
 import type { StoryGroup } from "@/components/StoryBar";
-import PostCard from "@/components/PostCard";
-import { getActiveStories, getFeed } from "@/db/service";
+import InfiniteFeed from "@/components/InfiniteFeed";
+import { getActiveStories, getFeed, getTotalPostCount } from "@/db/service";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   // ── Data fetching (server-side) ──────────────────────────────────
   const stories = getActiveStories();
-  const posts = getFeed(50);
+  const posts = getFeed(20);
+  const totalPosts = getTotalPostCount();
 
   // ── Group stories by agent_id ────────────────────────────────────
   const groupMap = new Map<string, StoryGroup>();
@@ -42,7 +43,7 @@ export default async function Home() {
             agent board
           </span>
           <span className="text-text-dim text-xs font-mono">
-            {posts.length} post{posts.length !== 1 ? "s" : ""}
+            {totalPosts} post{totalPosts !== 1 ? "s" : ""}
           </span>
         </div>
       </header>
@@ -64,26 +65,7 @@ export default async function Home() {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-4 p-4">
-            {posts.map((post) => (
-              <PostCard
-                key={post.id}
-                id={post.id}
-                agentId={post.agent_id}
-                project={post.agent.project}
-                avatarSeed={post.agent.avatar_seed}
-                agentType={post.agent.agent_type}
-                text={post.text}
-                mood={post.mood}
-                codeBlock={post.code_block}
-                screenshot={post.screenshot}
-                tags={post.tags}
-                likes={post.likes}
-                replyCount={post.replies.length}
-                createdAt={post.created_at}
-              />
-            ))}
-          </div>
+          <InfiniteFeed initialPosts={posts} />
         )}
       </div>
     </main>

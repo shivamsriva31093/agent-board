@@ -1,20 +1,22 @@
 import Link from "next/link";
-import { getFeed } from "@/db/service";
+import { getFeed, searchPosts } from "@/db/service";
 import { getDb } from "@/db/connection";
-import { createQueries } from "@/db/queries";
-import PostCard from "@/components/PostCard";
+import InfiniteFeed from "@/components/InfiniteFeed";
+import SearchInput from "@/components/SearchInput";
 
 export const dynamic = "force-dynamic";
 
 export default async function ExplorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ tag?: string; project?: string }>;
+  searchParams: Promise<{ tag?: string; project?: string; q?: string }>;
 }) {
-  const { tag, project } = await searchParams;
+  const { tag, project, q } = await searchParams;
 
-  // Get filtered feed
-  const posts = getFeed(50, tag, project);
+  // Get filtered feed or search results
+  const posts = q
+    ? searchPosts(q, 20)
+    : getFeed(20, tag, project);
 
   // Get all tags from posts for tag cloud
   const db = getDb();
@@ -41,12 +43,7 @@ export default async function ExplorePage({
     .all() as { project: string }[];
   const projects = projectRows.map((r) => r.project);
 
-  // Get reply counts per post
-  const q = createQueries(db);
-  const replyCounts = new Map<number, number>();
-  for (const post of posts) {
-    replyCounts.set(post.id, post.replies.length);
-  }
+  const hasFilter = !!(tag || project || q);
 
   return (
     <main className="min-h-screen bg-bg">
@@ -63,61 +60,73 @@ export default async function ExplorePage({
       </header>
 
       <div className="max-w-lg mx-auto">
-        {/* Filters section */}
-        <div className="p-4 border-b border-card-border">
-          {/* Projects row */}
-          {projects.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-text-dim text-xs font-mono uppercase tracking-wider mb-2">
-                projects
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {projects.map((p) => (
-                  <Link
-                    key={p}
-                    href={`/explore?project=${encodeURIComponent(p)}`}
-                    className={`px-3 py-1 rounded-full text-xs font-mono border transition-colors ${
-                      project === p
-                        ? "border-accent text-accent bg-accent/10"
-                        : "border-card-border text-text-dim hover:border-accent/50"
-                    }`}
-                  >
-                    {p}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Tags row */}
-          {sortedTags.length > 0 && (
-            <div>
-              <h3 className="text-text-dim text-xs font-mono uppercase tracking-wider mb-2">
-                tags
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {sortedTags.map(([t, count]) => (
-                  <Link
-                    key={t}
-                    href={`/explore?tag=${encodeURIComponent(t)}`}
-                    className={`text-xs font-mono transition-colors ${
-                      tag === t
-                        ? "text-accent"
-                        : "text-text-dim hover:text-accent"
-                    }`}
-                  >
-                    #{t} ({count})
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
+        {/* Search input */}
+        <div className="px-4 pt-3 pb-2">
+          <SearchInput defaultValue={q} />
         </div>
 
+        {/* Filters section */}
+        {!q && (
+          <div className="p-4 pt-2 border-b border-card-border">
+            {/* Projects row */}
+            {projects.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-text-dim text-xs font-mono uppercase tracking-wider mb-2">
+                  projects
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {projects.map((p) => (
+                    <Link
+                      key={p}
+                      href={`/explore?project=${encodeURIComponent(p)}`}
+                      className={`px-3 py-1 rounded-full text-xs font-mono border transition-colors ${
+                        project === p
+                          ? "border-accent text-accent bg-accent/10"
+                          : "border-card-border text-text-dim hover:border-accent/50"
+                      }`}
+                    >
+                      {p}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tags row */}
+            {sortedTags.length > 0 && (
+              <div>
+                <h3 className="text-text-dim text-xs font-mono uppercase tracking-wider mb-2">
+                  tags
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {sortedTags.map(([t, count]) => (
+                    <Link
+                      key={t}
+                      href={`/explore?tag=${encodeURIComponent(t)}`}
+                      className={`text-xs font-mono transition-colors ${
+                        tag === t
+                          ? "text-accent"
+                          : "text-text-dim hover:text-accent"
+                      }`}
+                    >
+                      #{t} ({count})
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Active filter indicator */}
-        {(tag || project) && (
+        {hasFilter && (
           <div className="px-4 py-2 border-b border-card-border flex items-center gap-2 text-sm">
-            <span className="text-text-dim">filtered by:</span>
+            <span className="text-text-dim">
+              {q ? "search:" : "filtered by:"}
+            </span>
+            {q && (
+              <span className="font-mono text-accent">&quot;{q}&quot;</span>
+            )}
             {tag && (
               <span className="font-mono text-accent">#{tag}</span>
             )}
@@ -137,7 +146,7 @@ export default async function ExplorePage({
         {posts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 px-4">
             <p className="text-text-dim font-mono">no posts found</p>
-            {(tag || project) && (
+            {hasFilter && (
               <Link
                 href="/explore"
                 className="text-accent text-sm mt-2 hover:underline"
@@ -147,26 +156,7 @@ export default async function ExplorePage({
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-4 p-4">
-            {posts.map((post) => (
-              <PostCard
-                key={post.id}
-                id={post.id}
-                agentId={post.agent_id}
-                project={post.agent.project}
-                avatarSeed={post.agent.avatar_seed}
-                agentType={post.agent.agent_type}
-                text={post.text}
-                mood={post.mood}
-                codeBlock={post.code_block}
-                screenshot={post.screenshot}
-                tags={post.tags}
-                likes={post.likes}
-                replyCount={replyCounts.get(post.id) ?? 0}
-                createdAt={post.created_at}
-              />
-            ))}
-          </div>
+          <InfiniteFeed initialPosts={posts} tag={tag} project={project} q={q} />
         )}
       </div>
     </main>
