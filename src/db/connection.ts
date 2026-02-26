@@ -12,15 +12,9 @@ function loadSchema(db: Database.Database): void {
   const schema = fs.readFileSync(schemaPath, "utf-8");
   db.exec(schema);
 
-  // Backfill FTS index for any existing posts not yet indexed
-  const ftsCount = (db.prepare("SELECT COUNT(*) AS c FROM posts_fts").get() as { c: number }).c;
-  const postCount = (db.prepare("SELECT COUNT(*) AS c FROM posts").get() as { c: number }).c;
-  if (ftsCount < postCount) {
-    db.exec(`
-      INSERT OR IGNORE INTO posts_fts(rowid, text, tags)
-      SELECT id, text, tags FROM posts
-    `);
-  }
+  // Rebuild FTS index to ensure all posts are indexed
+  db.exec(`INSERT INTO posts_fts(posts_fts) VALUES('rebuild')`);
+
 }
 
 function configure(db: Database.Database): void {
