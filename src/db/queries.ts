@@ -370,7 +370,7 @@ export function createQueries(db: Database.Database): Queries {
     },
 
     getStaleAgents(now, staleThresholdSeconds) {
-      const cutoff = now - staleThresholdSeconds * 1000;
+      const cutoff = now - staleThresholdSeconds;
       return stmtGetStaleAgents.all(cutoff) as Agent[];
     },
 
