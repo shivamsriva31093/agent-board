@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { createQueries, type Queries } from "../queries";
 
-// Helper: create a fresh in-memory db with schema applied
+// Helper: create a fresh in-memory db with v2 schema applied
 function freshDb(): Database.Database {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
@@ -28,7 +28,16 @@ afterEach(() => {
 
 // ── Seed helpers ──────────────────────────────────────────────────────
 
-function seedAgent(overrides: Partial<{ id: string; project: string; agent_type: string | null; avatar_seed: string; first_seen: number; last_seen: number }> = {}) {
+function seedAgent(
+  overrides: Partial<{
+    id: string;
+    project: string;
+    agent_type: string | null;
+    avatar_seed: string;
+    first_seen: number;
+    last_seen: number;
+  }> = {},
+) {
   return q.upsertAgent({
     id: overrides.id ?? "proj/agent-abc123",
     project: overrides.project ?? "proj",
@@ -39,13 +48,29 @@ function seedAgent(overrides: Partial<{ id: string; project: string; agent_type:
   });
 }
 
-function seedPost(agentId: string, overrides: Partial<{ text: string; mood: string; tags: string; code_block: string; created_at: number }> = {}) {
-  return q.insertPost({
+function seedEntry(
+  agentId: string,
+  overrides: Partial<{
+    text: string;
+    summary: string | null;
+    entry_type: string | null;
+    scope: string | null;
+    mood: string | null;
+    tags: string | null;
+    code_block: string | null;
+    screenshot: string | null;
+    created_at: number;
+  }> = {},
+) {
+  return q.insertEntry({
     agent_id: agentId,
     text: overrides.text ?? "Hello world",
+    summary: overrides.summary ?? null,
+    entry_type: overrides.entry_type ?? null,
+    scope: overrides.scope ?? null,
     mood: overrides.mood ?? null,
     code_block: overrides.code_block ?? null,
-    screenshot: null,
+    screenshot: overrides.screenshot ?? null,
     tags: overrides.tags ?? null,
     created_at: overrides.created_at ?? Date.now(),
   });
@@ -62,6 +87,10 @@ describe("agents", () => {
     expect(agent.avatar_seed).toBe("seed1");
     expect(agent.first_seen).toBe(1000);
     expect(agent.last_seen).toBe(2000);
+    // New v2 fields default to null
+    expect(agent.status).toBeNull();
+    expect(agent.current_task).toBeNull();
+    expect(agent.status_updated_at).toBeNull();
   });
 
   it("updates last_seen on conflict (keeps higher value)", () => {
@@ -109,6 +138,58 @@ describe("agents", () => {
     // Ordered by last_seen DESC
     expect(projAgents[0].id).toBe("proj/a2");
     expect(projAgents[1].id).toBe("proj/a1");
+  });
+
+  it("updates agent status", () => {
+    seedAgent();
+    const now = Date.now();
+
+    q.updateAgentStatus("proj/agent-abc123", "active", "fixing bugs", now);
+
+    const agent = q.getAgent("proj/agent-abc123");
+    expect(agent!.status).toBe("active");
+    expect(agent!.current_task).toBe("fixing bugs");
+    expect(agent!.status_updated_at).toBe(now);
+    // last_seen also updated
+    expect(agent!.last_seen).toBe(now);
+  });
+
+  it("gets active agents (status=active and status_updated_at recent)", () => {
+    const now = Date.now();
+
+    seedAgent({ id: "proj/a1", project: "proj" });
+    seedAgent({ id: "proj/a2", project: "proj" });
+    seedAgent({ id: "proj/a3", project: "proj" });
+
+    // a1: active and recently updated
+    q.updateAgentStatus("proj/a1", "active", "task1", now);
+    // a2: active but updated long ago
+    q.updateAgentStatus("proj/a2", "active", "task2", now - 999999);
+    // a3: idle status
+    q.updateAgentStatus("proj/a3", "idle", null, now);
+
+    // getActiveAgents: status='active' AND status_updated_at > threshold
+    const threshold = now - 60000; // 60 seconds ago
+    const active = q.getActiveAgents(threshold);
+    expect(active).toHaveLength(1);
+    expect(active[0].id).toBe("proj/a1");
+  });
+
+  it("gets stale agents (status=active but status_updated_at is old)", () => {
+    const now = Date.now();
+
+    seedAgent({ id: "proj/a1", project: "proj" });
+    seedAgent({ id: "proj/a2", project: "proj" });
+
+    // a1: active and recently updated
+    q.updateAgentStatus("proj/a1", "active", "task1", now);
+    // a2: active but updated 2 hours ago
+    q.updateAgentStatus("proj/a2", "active", "task2", now - 7200_000);
+
+    // Stale threshold: 1 hour (3600 seconds)
+    const stale = q.getStaleAgents(now, 3600);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].id).toBe("proj/a2");
   });
 });
 
@@ -165,28 +246,59 @@ describe("stories", () => {
     const agent = seedAgent();
     const now = Date.now();
 
-    q.insertStory({ agent_id: agent.id, mood: null, text: "First", created_at: now - 100, expires_at: now + 86400_000 });
-    q.insertStory({ agent_id: agent.id, mood: null, text: "Second", created_at: now, expires_at: now + 86400_000 });
+    q.insertStory({
+      agent_id: agent.id,
+      mood: null,
+      text: "First",
+      created_at: now - 100,
+      expires_at: now + 86400_000,
+    });
+    q.insertStory({
+      agent_id: agent.id,
+      mood: null,
+      text: "Second",
+      created_at: now,
+      expires_at: now + 86400_000,
+    });
 
     const active = q.getActiveStories(now - 200);
     expect(active[0].text).toBe("Second");
     expect(active[1].text).toBe("First");
   });
+
+  it("includes v2 agent fields in story agent", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+
+    q.updateAgentStatus(agent.id, "active", "working", now);
+
+    q.insertStory({
+      agent_id: agent.id,
+      mood: null,
+      text: "Story",
+      created_at: now,
+      expires_at: now + 86400_000,
+    });
+
+    const active = q.getActiveStories(now - 1);
+    expect(active[0].agent.status).toBe("active");
+    expect(active[0].agent.current_task).toBe("working");
+  });
 });
 
-// ── Posts ─────────────────────────────────────────────────────────────
+// ── Entries ──────────────────────────────────────────────────────────
 
-describe("posts", () => {
+describe("entries", () => {
   it("inserts and retrieves from feed", () => {
     const agent = seedAgent();
-    const post = seedPost(agent.id, { text: "My first post" });
+    const entry = seedEntry(agent.id, { text: "My first entry" });
 
-    expect(post.id).toBe(1);
-    expect(post.likes).toBe(0);
+    expect(entry.id).toBe(1);
+    expect(entry.likes).toBe(0);
 
     const feed = q.getFeed(10);
     expect(feed).toHaveLength(1);
-    expect(feed[0].text).toBe("My first post");
+    expect(feed[0].text).toBe("My first entry");
     expect(feed[0].agent.id).toBe(agent.id);
     expect(feed[0].replies).toHaveLength(0);
     expect(feed[0].reactions).toHaveLength(0);
@@ -194,8 +306,8 @@ describe("posts", () => {
 
   it("returns feed ordered by created_at DESC", () => {
     const agent = seedAgent();
-    seedPost(agent.id, { text: "Older", created_at: 1000 });
-    seedPost(agent.id, { text: "Newer", created_at: 2000 });
+    seedEntry(agent.id, { text: "Older", created_at: 1000 });
+    seedEntry(agent.id, { text: "Newer", created_at: 2000 });
 
     const feed = q.getFeed(10);
     expect(feed[0].text).toBe("Newer");
@@ -205,71 +317,259 @@ describe("posts", () => {
   it("respects feed limit", () => {
     const agent = seedAgent();
     for (let i = 0; i < 5; i++) {
-      seedPost(agent.id, { text: `Post ${i}`, created_at: i });
+      seedEntry(agent.id, { text: `Entry ${i}`, created_at: i });
     }
 
     const feed = q.getFeed(3);
     expect(feed).toHaveLength(3);
   });
 
+  it("paginates with before cursor", () => {
+    const agent = seedAgent();
+    seedEntry(agent.id, { text: "A", created_at: 1000 });
+    seedEntry(agent.id, { text: "B", created_at: 2000 });
+    seedEntry(agent.id, { text: "C", created_at: 3000 });
+
+    const page = q.getFeed(10, 3000);
+    expect(page).toHaveLength(2);
+    expect(page[0].text).toBe("B");
+    expect(page[1].text).toBe("A");
+  });
+
   it("filters by tag", () => {
     const agent = seedAgent();
-    seedPost(agent.id, { text: "Tagged", tags: JSON.stringify(["sqlite", "db"]) });
-    seedPost(agent.id, { text: "No tags" });
-    seedPost(agent.id, { text: "Other tag", tags: JSON.stringify(["react"]) });
+    seedEntry(agent.id, {
+      text: "Tagged",
+      tags: JSON.stringify(["sqlite", "db"]),
+    });
+    seedEntry(agent.id, { text: "No tags" });
+    seedEntry(agent.id, {
+      text: "Other tag",
+      tags: JSON.stringify(["react"]),
+    });
 
-    const sqlitePosts = q.getFeedByTag("sqlite");
-    expect(sqlitePosts).toHaveLength(1);
-    expect(sqlitePosts[0].text).toBe("Tagged");
-    expect(sqlitePosts[0].parsed_tags).toEqual(["sqlite", "db"]);
+    const sqliteEntries = q.getFeedByTag("sqlite");
+    expect(sqliteEntries).toHaveLength(1);
+    expect(sqliteEntries[0].text).toBe("Tagged");
+    expect(sqliteEntries[0].parsed_tags).toEqual(["sqlite", "db"]);
   });
 
   it("filters by project", () => {
     const agentA = seedAgent({ id: "alpha/a1", project: "alpha" });
     const agentB = seedAgent({ id: "beta/b1", project: "beta" });
 
-    seedPost(agentA.id, { text: "Alpha post" });
-    seedPost(agentB.id, { text: "Beta post" });
+    seedEntry(agentA.id, { text: "Alpha entry" });
+    seedEntry(agentB.id, { text: "Beta entry" });
 
-    const alphaPosts = q.getFeedByProject("alpha");
-    expect(alphaPosts).toHaveLength(1);
-    expect(alphaPosts[0].text).toBe("Alpha post");
-    expect(alphaPosts[0].agent.project).toBe("alpha");
+    const alphaEntries = q.getFeedByProject("alpha");
+    expect(alphaEntries).toHaveLength(1);
+    expect(alphaEntries[0].text).toBe("Alpha entry");
+    expect(alphaEntries[0].agent.project).toBe("alpha");
   });
 
-  it("retrieves a single post with details", () => {
+  it("retrieves a single entry with details", () => {
     const agent = seedAgent();
-    const codeBlock = JSON.stringify({ lang: "ts", content: "const x = 1;", filename: "test.ts" });
-    const post = seedPost(agent.id, {
+    const codeBlock = JSON.stringify({
+      lang: "ts",
+      content: "const x = 1;",
+      filename: "test.ts",
+    });
+    const entry = seedEntry(agent.id, {
       text: "Check this code",
+      summary: "Code review entry",
+      entry_type: "insight",
+      scope: JSON.stringify(["src/db/"]),
       code_block: codeBlock,
       tags: JSON.stringify(["typescript"]),
     });
 
-    const detail = q.getPost(post.id);
+    const detail = q.getEntry(entry.id);
     expect(detail).toBeDefined();
-    expect(detail!.parsed_code_block).toEqual({ lang: "ts", content: "const x = 1;", filename: "test.ts" });
+    expect(detail!.parsed_code_block).toEqual({
+      lang: "ts",
+      content: "const x = 1;",
+      filename: "test.ts",
+    });
     expect(detail!.parsed_tags).toEqual(["typescript"]);
+    expect(detail!.parsed_scope).toEqual(["src/db/"]);
+    expect(detail!.summary).toBe("Code review entry");
+    expect(detail!.entry_type).toBe("insight");
   });
 
-  it("returns undefined for missing post", () => {
-    expect(q.getPost(999)).toBeUndefined();
+  it("returns undefined for missing entry", () => {
+    expect(q.getEntry(999)).toBeUndefined();
+  });
+
+  it("hydrates v2 agent fields in entry detail", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+    q.updateAgentStatus(agent.id, "active", "coding", now);
+
+    const entry = seedEntry(agent.id, { text: "test" });
+    const detail = q.getEntry(entry.id);
+    expect(detail!.agent.status).toBe("active");
+    expect(detail!.agent.current_task).toBe("coding");
+  });
+});
+
+// ── Entry Summaries ──────────────────────────────────────────────────
+
+describe("getEntrySummaries", () => {
+  it("returns compact summaries with parsed tags", () => {
+    const agent = seedAgent();
+    seedEntry(agent.id, {
+      text: "Full text here",
+      summary: "Short summary",
+      entry_type: "insight",
+      mood: "happy",
+      tags: JSON.stringify(["sqlite", "testing"]),
+      created_at: 1000,
+    });
+
+    const summaries = q.getEntrySummaries();
+    expect(summaries).toHaveLength(1);
+
+    const s = summaries[0];
+    expect(s.id).toBe(1);
+    expect(s.agent_id).toBe(agent.id);
+    expect(s.project).toBe("proj");
+    expect(s.summary).toBe("Short summary");
+    expect(s.entry_type).toBe("insight");
+    expect(s.mood).toBe("happy");
+    expect(s.tags).toEqual(["sqlite", "testing"]);
+    expect(s.likes).toBe(0);
+    expect(s.reply_count).toBe(0);
+    expect(s.created_at).toBe(1000);
+  });
+
+  it("counts replies in summary", () => {
+    const agent = seedAgent();
+    const entry = seedEntry(agent.id, { text: "Discussion" });
+
+    q.insertReply({
+      post_id: entry.id,
+      agent_id: agent.id,
+      text: "Reply 1",
+      created_at: 1000,
+    });
+    q.insertReply({
+      post_id: entry.id,
+      agent_id: agent.id,
+      text: "Reply 2",
+      created_at: 2000,
+    });
+
+    const summaries = q.getEntrySummaries();
+    expect(summaries[0].reply_count).toBe(2);
+  });
+
+  it("filters by tag", () => {
+    const agent = seedAgent();
+    seedEntry(agent.id, {
+      text: "Tagged",
+      tags: JSON.stringify(["go"]),
+    });
+    seedEntry(agent.id, { text: "Untagged" });
+
+    const summaries = q.getEntrySummaries(50, "go");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].tags).toEqual(["go"]);
+  });
+
+  it("filters by project", () => {
+    const agentA = seedAgent({ id: "alpha/a1", project: "alpha" });
+    const agentB = seedAgent({ id: "beta/b1", project: "beta" });
+
+    seedEntry(agentA.id, { text: "Alpha" });
+    seedEntry(agentB.id, { text: "Beta" });
+
+    const summaries = q.getEntrySummaries(50, undefined, "alpha");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].project).toBe("alpha");
+  });
+
+  it("respects limit and before cursor", () => {
+    const agent = seedAgent();
+    for (let i = 1; i <= 5; i++) {
+      seedEntry(agent.id, { text: `Entry ${i}`, created_at: i * 1000 });
+    }
+
+    const limited = q.getEntrySummaries(2);
+    expect(limited).toHaveLength(2);
+    expect(limited[0].created_at).toBe(5000);
+
+    const paged = q.getEntrySummaries(2, undefined, undefined, 4000);
+    expect(paged).toHaveLength(2);
+    expect(paged[0].created_at).toBe(3000);
+    expect(paged[1].created_at).toBe(2000);
+  });
+
+  it("handles null/missing tags gracefully", () => {
+    const agent = seedAgent();
+    seedEntry(agent.id, { text: "No tags" });
+
+    const summaries = q.getEntrySummaries();
+    expect(summaries[0].tags).toEqual([]);
+  });
+});
+
+// ── Search ───────────────────────────────────────────────────────────
+
+describe("searchEntries", () => {
+  it("searches entries via FTS", () => {
+    const agent = seedAgent();
+    seedEntry(agent.id, { text: "SQLite is a great embedded database" });
+    seedEntry(agent.id, { text: "React hooks are powerful" });
+
+    const results = q.searchEntries("sqlite");
+    expect(results).toHaveLength(1);
+    expect(results[0].text).toContain("SQLite");
+  });
+
+  it("respects before cursor in search", () => {
+    const agent = seedAgent();
+    seedEntry(agent.id, {
+      text: "SQLite first mention",
+      created_at: 1000,
+    });
+    seedEntry(agent.id, {
+      text: "SQLite second mention",
+      created_at: 2000,
+    });
+
+    const results = q.searchEntries("sqlite", 50, 2000);
+    expect(results).toHaveLength(1);
+    expect(results[0].text).toContain("first");
   });
 });
 
 // ── Replies ───────────────────────────────────────────────────────────
 
 describe("replies", () => {
-  it("threads replies under a post", () => {
+  it("threads replies under an entry", () => {
     const author = seedAgent({ id: "proj/author", project: "proj" });
-    const replier = seedAgent({ id: "proj/replier", project: "proj", avatar_seed: "seed2" });
+    const replier = seedAgent({
+      id: "proj/replier",
+      project: "proj",
+      avatar_seed: "seed2",
+    });
 
-    const post = seedPost(author.id, { text: "Discussion topic" });
+    const entry = seedEntry(author.id, { text: "Discussion topic" });
 
-    q.insertReply({ post_id: post.id, agent_id: replier.id, text: "Great point!", created_at: 1000 });
-    q.insertReply({ post_id: post.id, agent_id: author.id, text: "Thanks!", created_at: 2000 });
+    q.insertReply({
+      post_id: entry.id,
+      agent_id: replier.id,
+      text: "Great point!",
+      created_at: 1000,
+    });
+    q.insertReply({
+      post_id: entry.id,
+      agent_id: author.id,
+      text: "Thanks!",
+      created_at: 2000,
+    });
 
-    const replies = q.getReplies(post.id);
+    const replies = q.getReplies(entry.id);
     expect(replies).toHaveLength(2);
     expect(replies[0].text).toBe("Great point!");
     expect(replies[0].agent.id).toBe("proj/replier");
@@ -277,15 +577,38 @@ describe("replies", () => {
     expect(replies[1].agent.id).toBe("proj/author");
   });
 
-  it("replies appear in post detail", () => {
+  it("replies appear in entry detail", () => {
     const agent = seedAgent();
-    const post = seedPost(agent.id);
-    q.insertReply({ post_id: post.id, agent_id: agent.id, text: "Self-reply", created_at: 1000 });
+    const entry = seedEntry(agent.id);
+    q.insertReply({
+      post_id: entry.id,
+      agent_id: agent.id,
+      text: "Self-reply",
+      created_at: 1000,
+    });
 
-    const detail = q.getPost(post.id);
+    const detail = q.getEntry(entry.id);
     expect(detail!.replies).toHaveLength(1);
     expect(detail!.replies[0].text).toBe("Self-reply");
     expect(detail!.replies[0].agent.id).toBe(agent.id);
+  });
+
+  it("reply agent includes v2 fields", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+    q.updateAgentStatus(agent.id, "active", "replying", now);
+
+    const entry = seedEntry(agent.id);
+    q.insertReply({
+      post_id: entry.id,
+      agent_id: agent.id,
+      text: "Hello",
+      created_at: now,
+    });
+
+    const replies = q.getReplies(entry.id);
+    expect(replies[0].agent.status).toBe("active");
+    expect(replies[0].agent.current_task).toBe("replying");
   });
 });
 
@@ -294,59 +617,374 @@ describe("replies", () => {
 describe("reactions", () => {
   it("adds reactions and increments likes", () => {
     const agent = seedAgent();
-    const post = seedPost(agent.id);
+    const entry = seedEntry(agent.id);
 
-    const reaction = q.insertReaction({ post_id: post.id, agent_id: agent.id, emoji: "♥", created_at: 1000 });
+    const reaction = q.insertReaction({
+      post_id: entry.id,
+      agent_id: agent.id,
+      emoji: "\u2665",
+      created_at: 1000,
+    });
     expect(reaction).toBeDefined();
-    expect(reaction!.emoji).toBe("♥");
+    expect(reaction!.emoji).toBe("\u2665");
 
-    q.incrementLikes(post.id);
+    q.incrementLikes(entry.id);
 
-    const detail = q.getPost(post.id);
+    const detail = q.getEntry(entry.id);
     expect(detail!.likes).toBe(1);
     expect(detail!.reactions).toHaveLength(1);
-    expect(detail!.reactions[0].emoji).toBe("♥");
+    expect(detail!.reactions[0].emoji).toBe("\u2665");
   });
 
-  it("prevents duplicate reactions (same post, agent, emoji)", () => {
+  it("prevents duplicate reactions (same entry, agent, emoji)", () => {
     const agent = seedAgent();
-    const post = seedPost(agent.id);
+    const entry = seedEntry(agent.id);
 
-    const first = q.insertReaction({ post_id: post.id, agent_id: agent.id, emoji: "♥", created_at: 1000 });
+    const first = q.insertReaction({
+      post_id: entry.id,
+      agent_id: agent.id,
+      emoji: "\u2665",
+      created_at: 1000,
+    });
     expect(first).toBeDefined();
 
     // Duplicate should be ignored
-    const duplicate = q.insertReaction({ post_id: post.id, agent_id: agent.id, emoji: "♥", created_at: 2000 });
+    const duplicate = q.insertReaction({
+      post_id: entry.id,
+      agent_id: agent.id,
+      emoji: "\u2665",
+      created_at: 2000,
+    });
     expect(duplicate).toBeUndefined();
 
     // But different emoji is allowed
-    const different = q.insertReaction({ post_id: post.id, agent_id: agent.id, emoji: "🔥", created_at: 3000 });
+    const different = q.insertReaction({
+      post_id: entry.id,
+      agent_id: agent.id,
+      emoji: "\uD83D\uDD25",
+      created_at: 3000,
+    });
     expect(different).toBeDefined();
 
-    const reactions = q.getReactions(post.id);
+    const reactions = q.getReactions(entry.id);
     expect(reactions).toHaveLength(2);
   });
 
   it("allows different agents to react with same emoji", () => {
     const agent1 = seedAgent({ id: "proj/a1", project: "proj" });
-    const agent2 = seedAgent({ id: "proj/a2", project: "proj", avatar_seed: "seed2" });
-    const post = seedPost(agent1.id);
+    const agent2 = seedAgent({
+      id: "proj/a2",
+      project: "proj",
+      avatar_seed: "seed2",
+    });
+    const entry = seedEntry(agent1.id);
 
-    q.insertReaction({ post_id: post.id, agent_id: agent1.id, emoji: "♥", created_at: 1000 });
-    q.insertReaction({ post_id: post.id, agent_id: agent2.id, emoji: "♥", created_at: 2000 });
+    q.insertReaction({
+      post_id: entry.id,
+      agent_id: agent1.id,
+      emoji: "\u2665",
+      created_at: 1000,
+    });
+    q.insertReaction({
+      post_id: entry.id,
+      agent_id: agent2.id,
+      emoji: "\u2665",
+      created_at: 2000,
+    });
 
-    const reactions = q.getReactions(post.id);
+    const reactions = q.getReactions(entry.id);
     expect(reactions).toHaveLength(2);
   });
 
-  it("reactions appear in post detail", () => {
+  it("reactions appear in entry detail", () => {
     const agent = seedAgent();
-    const post = seedPost(agent.id);
+    const entry = seedEntry(agent.id);
 
-    q.insertReaction({ post_id: post.id, agent_id: agent.id, emoji: "🎉", created_at: 1000 });
+    q.insertReaction({
+      post_id: entry.id,
+      agent_id: agent.id,
+      emoji: "\uD83C\uDF89",
+      created_at: 1000,
+    });
 
-    const detail = q.getPost(post.id);
+    const detail = q.getEntry(entry.id);
     expect(detail!.reactions).toHaveLength(1);
-    expect(detail!.reactions[0].emoji).toBe("🎉");
+    expect(detail!.reactions[0].emoji).toBe("\uD83C\uDF89");
+  });
+});
+
+// ── Claims ───────────────────────────────────────────────────────────
+
+describe("claims", () => {
+  it("inserts and retrieves active claims", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+
+    const claim = q.insertClaim({
+      agent_id: agent.id,
+      scope: "src/db/queries.ts",
+      scope_type: "file",
+      claimed_at: now,
+      expires_at: now + 3600_000, // 1 hour
+      status: "active",
+    });
+
+    expect(claim.id).toBe(1);
+    expect(claim.scope).toBe("src/db/queries.ts");
+    expect(claim.scope_type).toBe("file");
+    expect(claim.status).toBe("active");
+
+    const active = q.getActiveClaims(now);
+    expect(active).toHaveLength(1);
+    expect(active[0].scope).toBe("src/db/queries.ts");
+    expect(active[0].agent.id).toBe(agent.id);
+  });
+
+  it("excludes expired claims", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+
+    // Active claim
+    q.insertClaim({
+      agent_id: agent.id,
+      scope: "active-scope",
+      scope_type: "area",
+      claimed_at: now,
+      expires_at: now + 3600_000,
+      status: "active",
+    });
+
+    // Expired claim
+    q.insertClaim({
+      agent_id: agent.id,
+      scope: "expired-scope",
+      scope_type: "area",
+      claimed_at: now - 7200_000,
+      expires_at: now - 1, // already expired
+      status: "active",
+    });
+
+    const active = q.getActiveClaims(now);
+    expect(active).toHaveLength(1);
+    expect(active[0].scope).toBe("active-scope");
+  });
+
+  it("releases a claim", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+
+    const claim = q.insertClaim({
+      agent_id: agent.id,
+      scope: "src/",
+      scope_type: "module",
+      claimed_at: now,
+      expires_at: now + 3600_000,
+      status: "active",
+    });
+
+    q.releaseClaim(claim.id);
+
+    const active = q.getActiveClaims(now);
+    expect(active).toHaveLength(0);
+  });
+
+  it("finds claims by scope - file exact match", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+
+    q.insertClaim({
+      agent_id: agent.id,
+      scope: "src/db/queries.ts",
+      scope_type: "file",
+      claimed_at: now,
+      expires_at: now + 3600_000,
+      status: "active",
+    });
+
+    const matches = q.getClaimsByScope("src/db/queries.ts", now);
+    expect(matches).toHaveLength(1);
+
+    const noMatch = q.getClaimsByScope("src/db/other.ts", now);
+    expect(noMatch).toHaveLength(0);
+  });
+
+  it("finds claims by scope - module prefix match", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+
+    q.insertClaim({
+      agent_id: agent.id,
+      scope: "src/db/",
+      scope_type: "module",
+      claimed_at: now,
+      expires_at: now + 3600_000,
+      status: "active",
+    });
+
+    // Searching for a file within the module should match
+    const matches = q.getClaimsByScope("src/db/queries.ts", now);
+    expect(matches).toHaveLength(1);
+
+    // Searching for the parent should also match (reverse prefix)
+    const parentMatch = q.getClaimsByScope("src/", now);
+    expect(parentMatch).toHaveLength(1);
+
+    // Unrelated module should not match
+    const noMatch = q.getClaimsByScope("lib/utils/", now);
+    expect(noMatch).toHaveLength(0);
+  });
+
+  it("finds claims by scope - area fuzzy match", () => {
+    const agent = seedAgent();
+    const now = Date.now();
+
+    q.insertClaim({
+      agent_id: agent.id,
+      scope: "authentication",
+      scope_type: "area",
+      claimed_at: now,
+      expires_at: now + 3600_000,
+      status: "active",
+    });
+
+    // String containment: scope includes query
+    const matches = q.getClaimsByScope("auth", now);
+    expect(matches).toHaveLength(1);
+
+    // Reverse containment: query includes scope
+    const reverseMatch = q.getClaimsByScope("authentication system", now);
+    expect(reverseMatch).toHaveLength(1);
+
+    // No containment
+    const noMatch = q.getClaimsByScope("database", now);
+    expect(noMatch).toHaveLength(0);
+  });
+});
+
+// ── Digests ──────────────────────────────────────────────────────────
+
+describe("digests", () => {
+  it("upserts and retrieves a digest", () => {
+    const now = Date.now();
+
+    q.upsertDigest({
+      scope: "openrajya-os",
+      scope_type: "project",
+      summary: "Working on browser automation and portal scraping",
+      entry_count: 15,
+      last_entry_id: 42,
+      updated_at: now,
+    });
+
+    const digest = q.getDigest("openrajya-os", "project");
+    expect(digest).toBeDefined();
+    expect(digest!.scope).toBe("openrajya-os");
+    expect(digest!.scope_type).toBe("project");
+    expect(digest!.summary).toBe(
+      "Working on browser automation and portal scraping",
+    );
+    expect(digest!.entry_count).toBe(15);
+    expect(digest!.last_entry_id).toBe(42);
+    expect(digest!.updated_at).toBe(now);
+  });
+
+  it("upsert overwrites existing digest for same scope+scope_type", () => {
+    const now = Date.now();
+
+    q.upsertDigest({
+      scope: "agent-board",
+      scope_type: "project",
+      summary: "Initial setup",
+      entry_count: 5,
+      last_entry_id: 10,
+      updated_at: now,
+    });
+
+    q.upsertDigest({
+      scope: "agent-board",
+      scope_type: "project",
+      summary: "Added v2 schema and queries",
+      entry_count: 12,
+      last_entry_id: 25,
+      updated_at: now + 1000,
+    });
+
+    const digest = q.getDigest("agent-board", "project");
+    expect(digest!.summary).toBe("Added v2 schema and queries");
+    expect(digest!.entry_count).toBe(12);
+    expect(digest!.last_entry_id).toBe(25);
+  });
+
+  it("returns undefined for missing digest", () => {
+    expect(q.getDigest("nonexistent", "project")).toBeUndefined();
+  });
+
+  it("gets all digests ordered by updated_at DESC", () => {
+    const now = Date.now();
+
+    q.upsertDigest({
+      scope: "proj-a",
+      scope_type: "project",
+      summary: "Summary A",
+      entry_count: 1,
+      last_entry_id: 1,
+      updated_at: now - 1000,
+    });
+
+    q.upsertDigest({
+      scope: "proj-b",
+      scope_type: "project",
+      summary: "Summary B",
+      entry_count: 2,
+      last_entry_id: 2,
+      updated_at: now,
+    });
+
+    q.upsertDigest({
+      scope: "sqlite",
+      scope_type: "tag",
+      summary: "SQLite-related entries",
+      entry_count: 3,
+      last_entry_id: 3,
+      updated_at: now + 1000,
+    });
+
+    const all = q.getAllDigests();
+    expect(all).toHaveLength(3);
+    // Ordered by updated_at DESC
+    expect(all[0].scope).toBe("sqlite");
+    expect(all[1].scope).toBe("proj-b");
+    expect(all[2].scope).toBe("proj-a");
+  });
+
+  it("allows same scope with different scope_types", () => {
+    const now = Date.now();
+
+    q.upsertDigest({
+      scope: "agent-board",
+      scope_type: "project",
+      summary: "Project digest",
+      entry_count: 10,
+      last_entry_id: 20,
+      updated_at: now,
+    });
+
+    q.upsertDigest({
+      scope: "agent-board",
+      scope_type: "tag",
+      summary: "Tag digest",
+      entry_count: 3,
+      last_entry_id: 5,
+      updated_at: now,
+    });
+
+    const projectDigest = q.getDigest("agent-board", "project");
+    const tagDigest = q.getDigest("agent-board", "tag");
+
+    expect(projectDigest!.summary).toBe("Project digest");
+    expect(tagDigest!.summary).toBe("Tag digest");
+
+    const all = q.getAllDigests();
+    expect(all).toHaveLength(2);
   });
 });
