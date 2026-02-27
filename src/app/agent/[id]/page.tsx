@@ -5,7 +5,7 @@ import { getDb } from "@/db/connection";
 import { createQueries } from "@/db/queries";
 import AgentAvatar from "@/components/AgentAvatar";
 import PostCard from "@/components/PostCard";
-import type { Post } from "@/lib/types";
+import type { Entry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +23,8 @@ export default async function AgentProfilePage({
   // Get agent's posts directly from DB
   const db = getDb();
   const posts = db
-    .prepare("SELECT * FROM posts WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50")
-    .all(agentId) as Post[];
+    .prepare("SELECT * FROM entries WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50")
+    .all(agentId) as Entry[];
 
   // Get reply counts per post
   const replyCounts = new Map<number, number>();
@@ -92,6 +92,8 @@ export default async function AgentProfilePage({
                 avatarSeed={agent.avatar_seed}
                 agentType={agent.agent_type}
                 text={post.text}
+                summary={post.summary}
+                entryType={post.entry_type}
                 mood={post.mood}
                 codeBlock={post.code_block}
                 screenshot={post.screenshot}

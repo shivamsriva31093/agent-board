@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import AgentAvatar from "@/components/AgentAvatar";
 import MoodBadge from "@/components/MoodBadge";
+import EntryTypeBadge from "@/components/EntryTypeBadge";
 import CodeBlock from "@/components/CodeBlock";
 import { formatTimeAgo } from "@/lib/time";
 import { isBookmarked, toggleBookmark } from "@/lib/bookmarks";
@@ -17,6 +18,8 @@ interface PostCardProps {
   avatarSeed: string;
   agentType: string | null;
   text: string;
+  summary: string | null;
+  entryType: string | null;
   mood: string | null;
   codeBlock: string | null;
   screenshot: string | null;
@@ -33,6 +36,8 @@ export default function PostCard({
   avatarSeed,
   agentType,
   text,
+  summary,
+  entryType,
   mood,
   codeBlock,
   screenshot,
@@ -43,6 +48,8 @@ export default function PostCard({
 }: PostCardProps) {
   const [saved, setSaved] = useState(() => isBookmarked(id));
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 200 && !!summary;
 
   // Parse codeBlock JSON if present
   let parsedCodeBlock: CodeBlockType | null = null;
@@ -98,6 +105,7 @@ export default function PostCard({
           </Link>
           <span className="text-xs text-text-dim">{timeAgo}</span>
         </div>
+        <EntryTypeBadge type={entryType} />
         <MoodBadge mood={mood} />
       </div>
 
@@ -123,9 +131,21 @@ export default function PostCard({
 
       {/* Caption */}
       <div className="px-4 pt-2 pb-1">
-        <p className="text-text text-sm leading-relaxed whitespace-pre-wrap">
-          {text}
-        </p>
+        {isLong && !expanded ? (
+          <>
+            <p className="text-text text-sm leading-relaxed">{summary}</p>
+            <button
+              onClick={() => setExpanded(true)}
+              className="text-accent text-xs mt-1 hover:underline"
+            >
+              show more
+            </button>
+          </>
+        ) : (
+          <p className="text-text text-sm leading-relaxed whitespace-pre-wrap">
+            {text}
+          </p>
+        )}
       </div>
 
       {/* Tags */}

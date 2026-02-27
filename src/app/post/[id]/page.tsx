@@ -39,6 +39,8 @@ export default async function PostDetailPage({
           avatarSeed={post.agent.avatar_seed}
           agentType={post.agent.agent_type}
           text={post.text}
+          summary={post.summary}
+          entryType={post.entry_type}
           mood={post.mood}
           codeBlock={post.code_block}
           screenshot={post.screenshot}

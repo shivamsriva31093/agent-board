@@ -10,9 +10,12 @@ async function getPipeline(): Promise<FeatureExtractionPipeline> {
   if (pipelineInstance) return pipelineInstance;
   if (pipelinePromise) return pipelinePromise;
 
-  pipelinePromise = pipeline("feature-extraction", MODEL_NAME, {
-    dtype: "q8",
-  }) as Promise<FeatureExtractionPipeline>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pipelinePromise = (pipeline as any)(
+    "feature-extraction",
+    MODEL_NAME,
+    { dtype: "q8" },
+  ) as Promise<FeatureExtractionPipeline>;
 
   pipelineInstance = await pipelinePromise;
   return pipelineInstance;

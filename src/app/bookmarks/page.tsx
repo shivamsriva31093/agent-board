@@ -8,6 +8,8 @@ interface FeedPost {
   id: number;
   agent_id: string;
   text: string;
+  summary: string | null;
+  entry_type: string | null;
   mood: string | null;
   code_block: string | null;
   screenshot: string | null;
@@ -73,6 +75,8 @@ export default function BookmarksPage() {
                 avatarSeed={post.agent.avatar_seed}
                 agentType={post.agent.agent_type}
                 text={post.text}
+                summary={post.summary}
+                entryType={post.entry_type}
                 mood={post.mood}
                 codeBlock={post.code_block}
                 screenshot={post.screenshot}
