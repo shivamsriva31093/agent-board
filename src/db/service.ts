@@ -141,7 +141,7 @@ export function createService(db: Database.Database) {
         .then((embedding) => {
           try {
             db.prepare(
-              "INSERT INTO entry_embeddings(entry_id, embedding) VALUES (?, ?)",
+              "INSERT INTO entry_embeddings(entry_id, embedding) VALUES (CAST(? AS INTEGER), ?)",
             ).run(entry.id, Buffer.from(embedding.buffer));
           } catch {
             // Don't fail if embedding storage fails
@@ -314,6 +314,116 @@ export function createService(db: Database.Database) {
       }
 
       return summaries;
+    },
+
+    // ── contextFor ─────────────────────────────────────────────────
+
+    async contextFor(params: {
+      files: string[];
+      intent: string;
+      maxTokens?: number;
+    }): Promise<{
+      entries: (EntrySummary & { score: number })[];
+      claims: ClaimWithAgent[];
+      truncated: boolean;
+    }> {
+      const maxTokens = params.maxTokens ?? 600;
+      const ts = now();
+
+      // 1. Build composite query and embed
+      const queryText = `${params.intent} ${params.files.join(" ")}`;
+      let queryEmbedding: Float32Array;
+      try {
+        queryEmbedding = await embedText(queryText);
+      } catch {
+        return { entries: [], claims: [], truncated: false };
+      }
+
+      // 2. KNN search — over-fetch for filtering headroom
+      const candidateCount = Math.max(10, Math.ceil((maxTokens / 50) * 2));
+      const rows = db
+        .prepare(
+          `SELECT entry_id, distance
+           FROM entry_embeddings
+           WHERE embedding MATCH ? AND k = ?
+           ORDER BY distance`,
+        )
+        .all(Buffer.from(queryEmbedding.buffer), candidateCount) as {
+        entry_id: number;
+        distance: number;
+      }[];
+
+      // 3. Score and rank
+      const scored: (EntrySummary & { score: number })[] = [];
+      for (const row of rows) {
+        const entry = q.getEntry(row.entry_id);
+        if (!entry) continue;
+
+        const similarity = 1 - row.distance;
+
+        // Scope boost: does entry's scope overlap with any input file?
+        let scopeBoost = 0;
+        if (entry.parsed_scope.length > 0) {
+          for (const entryScope of entry.parsed_scope) {
+            for (const file of params.files) {
+              if (file.startsWith(entryScope) || entryScope.startsWith(file)) {
+                scopeBoost = 1;
+                break;
+              }
+            }
+            if (scopeBoost > 0) break;
+          }
+        }
+
+        // Recency: 1 / (1 + days_old / 30)
+        const daysOld = Math.max(0, (ts - entry.created_at) / 86400);
+        const recency = 1 / (1 + daysOld / 30);
+
+        const score = similarity * 0.6 + scopeBoost * 0.25 + recency * 0.15;
+
+        scored.push({
+          id: entry.id,
+          agent_id: entry.agent_id,
+          project: entry.agent.project,
+          summary: entry.summary,
+          entry_type: entry.entry_type,
+          mood: entry.mood,
+          tags: entry.parsed_tags,
+          likes: entry.likes,
+          reply_count: entry.replies.length,
+          created_at: entry.created_at,
+          score,
+        });
+      }
+
+      // Sort by score descending
+      scored.sort((a, b) => b.score - a.score);
+
+      // 4. Fetch claims overlapping input files
+      const claimSet = new Map<number, ClaimWithAgent>();
+      for (const file of params.files) {
+        const fileClaims = q.getClaimsByScope(file, ts);
+        for (const c of fileClaims) {
+          claimSet.set(c.id, c);
+        }
+      }
+      const claims = Array.from(claimSet.values());
+
+      // 5. Truncate to token budget
+      let tokenEstimate = 0;
+      let truncated = false;
+      const result: (EntrySummary & { score: number })[] = [];
+      for (const entry of scored) {
+        const entryTokens = Math.ceil((entry.summary?.length ?? 0) / 4) + 15;
+        if (tokenEstimate + entryTokens > maxTokens) {
+          truncated = true;
+          break;
+        }
+        tokenEstimate += entryTokens;
+        result.push(entry);
+      }
+
+      return { entries: result, claims, truncated };
     },
 
     // ── createClaim ────────────────────────────────────────────────

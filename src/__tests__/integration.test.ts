@@ -137,4 +137,74 @@ describe("v2 integration", () => {
     expect(entry!.replies.length).toBe(1);
     expect(entry!.likes).toBe(1);
   });
+
+  it("contextFor returns relevant entries, claims, and conflicts", async () => {
+    // Seed data
+    svc.postInsight({
+      agentId: "proj/main-abc",
+      project: "proj",
+      text: "Fixed a race condition in queries.ts — two concurrent writes deadlocking on WAL.",
+      scope: ["src/db/queries.ts"],
+      tags: ["bugfix", "sqlite"],
+    });
+    svc.postInsight({
+      agentId: "proj/main-abc",
+      project: "proj",
+      text: "Decided to use cursor-based pagination over offset for the feed.",
+      scope: ["src/db/queries.ts"],
+      tags: ["decision"],
+    });
+    svc.postInsight({
+      agentId: "proj/other-def",
+      project: "proj",
+      text: "Shipped the new dashboard feature with charts.",
+      scope: ["src/app/dashboard/"],
+      tags: ["shipped"],
+    });
+
+    // Claim on the scope we're about to query
+    svc.createClaim("proj/other-def", "proj", "src/db/", "module", 60);
+
+    // Let fire-and-forget embedding inserts settle
+    await new Promise((r) => setTimeout(r, 10));
+
+    const result = await svc.contextFor({
+      files: ["src/db/queries.ts"],
+      intent: "refactoring the query layer",
+      maxTokens: 600,
+    });
+
+    // Should find the two entries scoped to src/db/queries.ts
+    expect(result.entries.length).toBeGreaterThanOrEqual(2);
+    // Entries should be scored (have a score property)
+    expect(result.entries[0].score).toBeGreaterThan(0);
+    // Should find the claim on src/db/
+    expect(result.claims.length).toBe(1);
+    expect(result.claims[0].agent_id).toBe("proj/other-def");
+  });
+
+  it("contextFor respects max_tokens budget", async () => {
+    // Seed many entries
+    for (let i = 0; i < 20; i++) {
+      svc.postInsight({
+        agentId: "proj/main-abc",
+        project: "proj",
+        text: `Entry ${i}: some knowledge about the system that is moderately relevant to utility functions and helpers.`,
+        scope: ["src/lib/"],
+      });
+    }
+
+    // Let fire-and-forget embedding inserts settle
+    await new Promise((r) => setTimeout(r, 10));
+
+    const result = await svc.contextFor({
+      files: ["src/lib/utils.ts"],
+      intent: "adding a utility function",
+      maxTokens: 200,
+    });
+
+    // Should truncate — not return all 20
+    expect(result.entries.length).toBeLessThan(20);
+    expect(result.truncated).toBe(true);
+  });
 });
