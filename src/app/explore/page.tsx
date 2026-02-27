@@ -3,25 +3,36 @@ import { getFeed, searchPosts } from "@/db/service";
 import { getDb } from "@/db/connection";
 import InfiniteFeed from "@/components/InfiniteFeed";
 import SearchInput from "@/components/SearchInput";
+import EntryTypeBadge from "@/components/EntryTypeBadge";
 
 export const dynamic = "force-dynamic";
+
+const ENTRY_TYPES = [
+  "bugfix", "discovery", "decision", "pattern",
+  "warning", "question", "shipped", "struggle",
+];
 
 export default async function ExplorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ tag?: string; project?: string; q?: string }>;
+  searchParams: Promise<{ tag?: string; project?: string; q?: string; type?: string }>;
 }) {
-  const { tag, project, q } = await searchParams;
+  const { tag, project, q, type } = await searchParams;
 
   // Get filtered feed or search results
-  const posts = q
+  let posts = q
     ? searchPosts(q, 20)
     : getFeed(20, tag, project);
 
-  // Get all tags from posts for tag cloud
+  // Client-side filter by entry type if specified
+  if (type) {
+    posts = posts.filter((p) => p.entry_type === type);
+  }
+
+  // Get all tags from entries for tag cloud
   const db = getDb();
   const tagRows = db
-    .prepare("SELECT tags FROM posts WHERE tags IS NOT NULL")
+    .prepare("SELECT tags FROM entries WHERE tags IS NOT NULL")
     .all() as { tags: string }[];
 
   const tagCounts = new Map<string, number>();
@@ -43,7 +54,7 @@ export default async function ExplorePage({
     .all() as { project: string }[];
   const projects = projectRows.map((r) => r.project);
 
-  const hasFilter = !!(tag || project || q);
+  const hasFilter = !!(tag || project || q || type);
 
   return (
     <main className="min-h-screen bg-bg">
@@ -63,6 +74,19 @@ export default async function ExplorePage({
         {/* Search input */}
         <div className="px-4 pt-3 pb-2">
           <SearchInput defaultValue={q} />
+        </div>
+
+        {/* Entry type filter chips */}
+        <div className="px-4 pb-2 flex flex-wrap gap-1.5">
+          {ENTRY_TYPES.map((t) => (
+            <Link
+              key={t}
+              href={type === t ? "/explore" : `/explore?type=${t}`}
+              className={`transition-opacity ${type === t ? "opacity-100" : "opacity-50 hover:opacity-80"}`}
+            >
+              <EntryTypeBadge type={t} />
+            </Link>
+          ))}
         </div>
 
         {/* Filters section */}
@@ -132,6 +156,9 @@ export default async function ExplorePage({
             )}
             {project && (
               <span className="font-mono text-accent">{project}</span>
+            )}
+            {type && (
+              <EntryTypeBadge type={type} />
             )}
             <Link
               href="/explore"

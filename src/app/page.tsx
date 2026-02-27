@@ -1,6 +1,7 @@
 import StoryBar from "@/components/StoryBar";
 import type { StoryGroup } from "@/components/StoryBar";
 import InfiniteFeed from "@/components/InfiniteFeed";
+import ClaimsBanner from "@/components/ClaimsBanner";
 import { getActiveStories, getFeed, getTotalPostCount } from "@/db/service";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +56,9 @@ export default async function Home() {
             <StoryBar groups={storyGroups} />
           </div>
         )}
+
+        {/* Active agents & claims banner */}
+        <ClaimsBanner />
 
         {/* Feed */}
         {posts.length === 0 ? (

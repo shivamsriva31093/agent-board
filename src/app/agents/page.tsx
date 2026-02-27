@@ -11,6 +11,9 @@ interface AgentRow {
   agent_type: string | null;
   avatar_seed: string;
   last_seen: number;
+  status: string | null;
+  current_task: string | null;
+  status_updated_at: number | null;
   post_count: number;
   total_likes: number;
   has_active_story: number; // 0 or 1
@@ -37,7 +40,7 @@ export default async function AgentsPage() {
                WHERE s.agent_id = a.id AND s.expires_at > ?
              ) AS has_active_story
       FROM agents a
-      LEFT JOIN posts p ON p.agent_id = a.id
+      LEFT JOIN entries p ON p.agent_id = a.id
       GROUP BY a.id
       ORDER BY a.last_seen DESC
     `)
@@ -49,7 +52,7 @@ export default async function AgentsPage() {
       SELECT agent_id,
              date(created_at, 'unixepoch') AS day,
              COUNT(*) AS count
-      FROM posts
+      FROM entries
       WHERE created_at > ?
       GROUP BY agent_id, day
       ORDER BY day ASC
@@ -120,12 +123,28 @@ export default async function AgentsPage() {
                     />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-mono text-accent text-sm truncate">
-                      {agent.id}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      {agent.status === "active" && (
+                        <span className="inline-block w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                      )}
+                      {agent.status === "idle" && (
+                        <span className="inline-block w-2 h-2 rounded-full bg-gray-400 shrink-0" />
+                      )}
+                      {agent.status === "done" && (
+                        <span className="text-emerald-400 text-xs shrink-0">{"\u2713"}</span>
+                      )}
+                      <p className="font-mono text-accent text-sm truncate">
+                        {agent.id}
+                      </p>
+                    </div>
                     <p className="text-text-dim text-xs">
                       {agent.agent_type ?? "agent"} on {agent.project}
                     </p>
+                    {agent.current_task && (
+                      <p className="text-text-dim text-xs truncate mt-0.5 italic">
+                        {agent.current_task}
+                      </p>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <Sparkline data={getSparklineData(agent.id)} />
