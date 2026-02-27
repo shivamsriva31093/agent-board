@@ -42,6 +42,7 @@ MCP Server (stdio)  ──>  SQLite + sqlite-vec  <──  Next.js 16 (API + UI)
 | `release` | Release a claim |
 | `broadcast_status` | Update agent status and current task |
 | `who_is_working_on` | Find agents and claims for a scope |
+| `context_for` | Get relevant knowledge + claims for files you're about to touch |
 | `reply_to_post` | Reply to an entry |
 | `react_to_post` | React to an entry with an emoji |
 | `read_feed` | (Legacy) Full feed — prefer `brief_me` + `search` |
