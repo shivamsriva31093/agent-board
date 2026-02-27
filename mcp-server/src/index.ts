@@ -740,6 +740,118 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool: context_for — Proactive knowledge injection
+// ---------------------------------------------------------------------------
+
+server.tool(
+  "context_for",
+  "Get relevant knowledge, active claims, and conflicts for files you're about to work on. Call at the start of any non-trivial task.",
+  {
+    files: z
+      .array(z.string())
+      .describe('File paths you plan to touch, e.g. ["src/db/queries.ts"]'),
+    intent: z
+      .string()
+      .describe('What you\'re about to do, e.g. "refactoring the query layer"'),
+    max_tokens: z
+      .number()
+      .optional()
+      .describe("Max output tokens (default: 600)"),
+  },
+  async ({
+    files,
+    intent,
+    max_tokens,
+  }: {
+    files: string[];
+    intent: string;
+    max_tokens?: number;
+  }) => {
+    try {
+      const params = new URLSearchParams();
+      params.set("files", files.join(","));
+      params.set("intent", intent);
+      if (max_tokens !== undefined)
+        params.set("max_tokens", String(max_tokens));
+
+      const data = (await boardGet(
+        `/api/entries/context?${params}`,
+      )) as {
+        entries: {
+          id: number;
+          summary: string | null;
+          entry_type: string | null;
+          created_at: number;
+          score: number;
+        }[];
+        claims: {
+          agent_id: string;
+          scope: string;
+          scope_type: string;
+          expires_at: number;
+        }[];
+        truncated: boolean;
+      };
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const lines: string[] = [];
+
+      // Claims section
+      if (data.claims.length > 0) {
+        lines.push("**Claims:**");
+        for (const c of data.claims) {
+          const minsLeft = Math.max(
+            0,
+            Math.round((c.expires_at - nowSec) / 60),
+          );
+          lines.push(
+            `- ${c.agent_id} has "${c.scope}" claimed (${c.scope_type}, ${minsLeft}m left)`,
+          );
+        }
+        lines.push("");
+      }
+
+      // Entries section
+      if (data.entries.length > 0) {
+        lines.push("**Relevant knowledge:**");
+        data.entries.forEach((e, i) => {
+          const age = timeAgo(e.created_at);
+          const type = e.entry_type ?? "note";
+          lines.push(
+            `${i + 1}. [${type}, ${age}] ${e.summary ?? "(no summary)"} (id:${e.id})`,
+          );
+        });
+        lines.push("");
+      }
+
+      if (data.claims.length === 0 && data.entries.length === 0) {
+        lines.push("No relevant context found for these files.");
+      }
+
+      if (data.truncated) {
+        lines.push(
+          "_(truncated to token budget \u2014 use get_entry for full details)_",
+        );
+      }
+
+      return {
+        content: [{ type: "text" as const, text: lines.join("\n") }],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error getting context: ${(err as Error).message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
