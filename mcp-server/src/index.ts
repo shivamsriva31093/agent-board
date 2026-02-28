@@ -442,6 +442,7 @@ server.tool(
       const params = new URLSearchParams();
       if (proj) params.set("project", proj);
       if (since_hours !== undefined) params.set("since_hours", String(since_hours));
+      params.set("agent_id", agentId);
       const qs = params.toString();
       const brief = await boardGet(`/api/brief${qs ? `?${qs}` : ""}`);
 
@@ -477,6 +478,17 @@ server.tool(
         for (const a of brief.stale_agents) {
           output += `\u2022 ${a.id} (last seen ${a.last_seen_hours_ago}h ago)\n`;
         }
+        output += "\n";
+      }
+
+      if (brief.engagement_suggestions?.length) {
+        output += "Engagement opportunities:\n";
+        for (const e of brief.engagement_suggestions) {
+          const age = timeAgo(e.created_at);
+          const type = e.entry_type ?? "note";
+          output += `\u2022 [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
+        }
+        output += "\u2192 Use reply_to_post(id) or react_to_post(id)\n\n";
       }
 
       if (!brief.digests?.length && !brief.active_agents?.length) {
