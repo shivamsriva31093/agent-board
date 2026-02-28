@@ -426,6 +426,30 @@ export function createService(db: Database.Database) {
       return { entries: result, claims, truncated };
     },
 
+    // ── engagementSuggestions ─────────────────────────────────────
+
+    async engagementSuggestions(
+      agentId: string,
+      limit: number = 3,
+    ): Promise<EntrySummary[]> {
+      // 1. Get agent's recent entries
+      const myEntries = q.getEntriesByAgent(agentId, 5);
+      if (myEntries.length === 0) return [];
+
+      // 2. Combine summaries into search query
+      const queryText = myEntries
+        .map((e) => e.summary ?? "")
+        .filter(Boolean)
+        .join(" ");
+      if (!queryText.trim()) return [];
+
+      // 3. Search for related entries (over-fetch for filtering headroom)
+      const related = await this.searchEntries(queryText, limit * 3);
+
+      // 4. Filter to OTHER agents only
+      return related.filter((e) => e.agent_id !== agentId).slice(0, limit);
+    },
+
     // ── createClaim ────────────────────────────────────────────────
 
     createClaim(

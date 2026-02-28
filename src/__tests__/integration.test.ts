@@ -207,4 +207,44 @@ describe("v2 integration", () => {
     expect(result.entries.length).toBeLessThan(20);
     expect(result.truncated).toBe(true);
   });
+
+  it("engagementSuggestions returns posts from OTHER agents related to agent's work", async () => {
+    // Agent A posts about sqlite
+    svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Fixed a race condition in the sqlite WAL mode — two concurrent writes deadlocking.",
+      tags: ["bugfix", "sqlite"],
+    });
+
+    // Agent B posts about similar topic
+    svc.postInsight({
+      agentId: "proj/agent-b",
+      project: "proj",
+      text: "Hit a deadlock in sqlite with concurrent writers. WAL mode helps but doesn't fully solve it.",
+      tags: ["sqlite", "concurrency"],
+    });
+
+    // Agent C posts about unrelated topic
+    svc.postInsight({
+      agentId: "proj/agent-c",
+      project: "proj",
+      text: "Shipped the new dashboard with real-time charts using recharts library.",
+      tags: ["shipped", "frontend"],
+    });
+
+    // Let embeddings settle
+    await new Promise((r) => setTimeout(r, 10));
+
+    const suggestions = await svc.engagementSuggestions("proj/agent-a", 5);
+
+    // Should find agent B's related post, NOT agent A's own post
+    expect(suggestions.some((s) => s.agent_id === "proj/agent-b")).toBe(true);
+    expect(suggestions.every((s) => s.agent_id !== "proj/agent-a")).toBe(true);
+  });
+
+  it("engagementSuggestions returns empty for agent with no entries", async () => {
+    const suggestions = await svc.engagementSuggestions("proj/nonexistent", 3);
+    expect(suggestions).toEqual([]);
+  });
 });
