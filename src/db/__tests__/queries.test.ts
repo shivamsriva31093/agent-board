@@ -513,6 +513,99 @@ describe("getEntrySummaries", () => {
   });
 });
 
+// ── getEntriesByAgent ─────────────────────────────────────────────────
+
+describe("getEntriesByAgent", () => {
+  it("returns only entries from the specified agent", () => {
+    const agentA = seedAgent({ id: "alpha/a1", project: "alpha" });
+    const agentB = seedAgent({ id: "beta/b1", project: "beta" });
+
+    seedEntry(agentA.id, { text: "Alpha entry 1", created_at: 1000 });
+    seedEntry(agentA.id, { text: "Alpha entry 2", created_at: 2000 });
+    seedEntry(agentB.id, { text: "Beta entry 1", created_at: 3000 });
+
+    const results = q.getEntriesByAgent(agentA.id);
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => r.agent_id === agentA.id)).toBe(true);
+  });
+
+  it("returns entries ordered by created_at DESC (newest first)", () => {
+    const agent = seedAgent();
+    seedEntry(agent.id, { text: "Older", created_at: 1000 });
+    seedEntry(agent.id, { text: "Newer", created_at: 2000 });
+    seedEntry(agent.id, { text: "Newest", created_at: 3000 });
+
+    const results = q.getEntriesByAgent(agent.id);
+    expect(results[0].created_at).toBe(3000);
+    expect(results[1].created_at).toBe(2000);
+    expect(results[2].created_at).toBe(1000);
+  });
+
+  it("respects the limit parameter", () => {
+    const agent = seedAgent();
+    for (let i = 1; i <= 5; i++) {
+      seedEntry(agent.id, { text: `Entry ${i}`, created_at: i * 1000 });
+    }
+
+    const results = q.getEntriesByAgent(agent.id, 2);
+    expect(results).toHaveLength(2);
+    // Should be the 2 newest
+    expect(results[0].created_at).toBe(5000);
+    expect(results[1].created_at).toBe(4000);
+  });
+
+  it("defaults to limit 50", () => {
+    const agent = seedAgent();
+    // Insert 3 entries — all should be returned with default limit
+    for (let i = 1; i <= 3; i++) {
+      seedEntry(agent.id, { text: `Entry ${i}`, created_at: i * 1000 });
+    }
+
+    const results = q.getEntriesByAgent(agent.id);
+    expect(results).toHaveLength(3);
+  });
+
+  it("returns correct EntrySummary shape with parsed tags and reply_count", () => {
+    const agent = seedAgent();
+    const entry = seedEntry(agent.id, {
+      text: "Full text",
+      summary: "Short summary",
+      entry_type: "insight",
+      mood: "focused",
+      tags: JSON.stringify(["typescript", "db"]),
+      created_at: 5000,
+    });
+
+    q.insertReply({
+      post_id: entry.id,
+      agent_id: agent.id,
+      text: "Reply 1",
+      created_at: 6000,
+    });
+
+    const results = q.getEntriesByAgent(agent.id);
+    expect(results).toHaveLength(1);
+
+    const s = results[0];
+    expect(s.id).toBe(entry.id);
+    expect(s.agent_id).toBe(agent.id);
+    expect(s.project).toBe("proj");
+    expect(s.summary).toBe("Short summary");
+    expect(s.entry_type).toBe("insight");
+    expect(s.mood).toBe("focused");
+    expect(s.tags).toEqual(["typescript", "db"]);
+    expect(s.likes).toBe(0);
+    expect(s.reply_count).toBe(1);
+    expect(s.created_at).toBe(5000);
+  });
+
+  it("returns empty array for agent with no entries", () => {
+    seedAgent({ id: "proj/lonely", project: "proj" });
+    const results = q.getEntriesByAgent("proj/lonely");
+    expect(results).toHaveLength(0);
+  });
+});
+
 // ── Search ───────────────────────────────────────────────────────────
 
 describe("searchEntries", () => {

@@ -34,6 +34,7 @@ export interface Queries {
   getFeedByTag(tag: string, limit?: number, before?: number): EntryWithDetails[];
   getFeedByProject(project: string, limit?: number, before?: number): EntryWithDetails[];
   getEntrySummaries(limit?: number, tag?: string, project?: string, before?: number): EntrySummary[];
+  getEntriesByAgent(agentId: string, limit?: number): EntrySummary[];
   searchEntries(query: string, limit?: number, before?: number): EntryWithDetails[];
 
   // Replies (unchanged, still uses post_id column)
@@ -272,6 +273,16 @@ export function createQueries(db: Database.Database): Queries {
     LIMIT ?
   `);
 
+  const stmtGetEntriesByAgent = db.prepare(`
+    SELECT e.id, e.agent_id, a.project, e.summary, e.entry_type, e.mood, e.tags,
+           e.likes, e.created_at,
+           (SELECT COUNT(*) FROM replies r WHERE r.post_id = e.id) AS reply_count
+    FROM entries e JOIN agents a ON e.agent_id = a.id
+    WHERE e.agent_id = ?
+    ORDER BY e.created_at DESC
+    LIMIT ?
+  `);
+
   // Replies
   const stmtInsertReply = db.prepare(`
     INSERT INTO replies (post_id, agent_id, text, created_at)
@@ -470,6 +481,43 @@ export function createQueries(db: Database.Database): Queries {
 
       const stmt = db.prepare(sql);
       const rows = stmt.all(...params) as {
+        id: number;
+        agent_id: string;
+        project: string;
+        summary: string | null;
+        entry_type: string | null;
+        mood: string | null;
+        tags: string | null;
+        likes: number;
+        created_at: number;
+        reply_count: number;
+      }[];
+
+      return rows.map((r) => {
+        let parsed_tags: string[] = [];
+        try {
+          if (r.tags) parsed_tags = JSON.parse(r.tags);
+        } catch {
+          /* ignore */
+        }
+
+        return {
+          id: r.id,
+          agent_id: r.agent_id,
+          project: r.project,
+          summary: r.summary,
+          entry_type: r.entry_type,
+          mood: r.mood,
+          tags: parsed_tags,
+          likes: r.likes,
+          reply_count: r.reply_count,
+          created_at: r.created_at,
+        };
+      });
+    },
+
+    getEntriesByAgent(agentId, limit = 50) {
+      const rows = stmtGetEntriesByAgent.all(agentId, limit) as {
         id: number;
         agent_id: string;
         project: string;
