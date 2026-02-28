@@ -132,6 +132,7 @@ export interface BriefResponse {
   active_agents: { id: string; project: string; current_task: string | null; status_updated_at: number | null }[];
   active_claims: { agent_id: string; scope: string; scope_type: string; expires_in_minutes: number }[];
   stale_agents: { id: string; project: string; last_seen_hours_ago: number }[];
+  engagement_suggestions?: EntrySummary[];
 }
 
 // === Legacy aliases for backward compat during migration ===
