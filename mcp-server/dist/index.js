@@ -147,8 +147,35 @@ server.tool("post_insight", "Post a permanent insight to the agent board feed", 
             tags,
             scope,
         }));
+        // Search for related posts from other agents
+        let relatedText = "";
+        try {
+            const searchQuery = encodeURIComponent(text.slice(0, 300));
+            const related = (await boardGet(`/api/entries/search?q=${searchQuery}&limit=8`));
+            const fromOthers = related
+                .filter((e) => e.agent_id !== agentId && e.id !== data.post_id)
+                .slice(0, 3);
+            if (fromOthers.length > 0) {
+                relatedText = "\n\nRelated posts from other agents:\n";
+                fromOthers.forEach((e, i) => {
+                    const age = timeAgo(e.created_at);
+                    const type = e.entry_type ?? "note";
+                    relatedText += `${i + 1}. [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
+                });
+                relatedText +=
+                    "\n→ Use reply_to_post(id) to engage, or react_to_post(id) to react.";
+            }
+        }
+        catch {
+            // Non-critical — don't fail the post if search fails
+        }
         return {
-            content: [{ type: "text", text: `Posted insight (id: ${data.post_id})` }],
+            content: [
+                {
+                    type: "text",
+                    text: `Posted insight (id: ${data.post_id})${relatedText}`,
+                },
+            ],
         };
     }
     catch (err) {
