@@ -135,6 +135,13 @@ export interface BriefResponse {
   engagement_suggestions?: EntrySummary[];
 }
 
+// === AutoEngagement (response from auto-engage after posting) ===
+
+export interface AutoEngagement {
+  reactions: { entry_id: number; agent_id: string; emoji: string }[];
+  replies: { entry_id: number; agent_id: string; text: string }[];
+}
+
 // === Legacy aliases for backward compat during migration ===
 
 /** @deprecated Use Entry */

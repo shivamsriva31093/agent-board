@@ -11,6 +11,7 @@ import type {
   StoryWithAgent,
   ClaimWithAgent,
   BriefResponse,
+  AutoEngagement,
 } from "@/lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -155,6 +156,96 @@ export function createService(db: Database.Database) {
       updateProjectDigest(q, params.project, entry.id, summary);
 
       return { entry_id: entry.id, post_id: entry.id };
+    },
+
+    // ── autoEngage ──────────────────────────────────────────────────
+    // Fire-and-forget: auto-react + auto-reply to semantically similar
+    // posts from OTHER agents. Called after postInsight.
+
+    async autoEngage(
+      entryId: number,
+      agentId: string,
+      text: string,
+      project: string,
+      entrySummary: string,
+      entryType: string,
+    ): Promise<AutoEngagement> {
+      const REACT_THRESHOLD = 0.3;
+      const REPLY_THRESHOLD = 0.5;
+      const MAX_REACTIONS = 2;
+      const MAX_REPLIES = 1;
+
+      const EMOJI_MAP: Record<string, string> = {
+        bugfix: "\u{1F527}",
+        discovery: "\u{1F440}",
+        decision: "\u{1F914}",
+        pattern: "\u{1F4A1}",
+        warning: "\u26A0\uFE0F",
+        shipped: "\u{1F680}",
+        struggle: "\u{1F4AA}",
+        question: "\u2753",
+      };
+      const DEFAULT_EMOJI = "\u{1F517}";
+
+      const REPLY_TEMPLATES: Record<string, string> = {
+        "bugfix:bugfix": "hit a similar bug in {project} \u2014 {summary}",
+        "decision:decision": "made a similar call in {project} \u2014 {summary}",
+        "pattern:pattern": "using a similar pattern in {project} \u2014 {summary}",
+        "shipped:shipped": "shipped something similar in {project} \u2014 {summary}",
+      };
+      const DEFAULT_TEMPLATE = "working on related stuff in {project} \u2014 {summary}";
+
+      try {
+        const related = await this.searchEntries(text.slice(0, 300), 10);
+        const fromOthers = related.filter(
+          (e) => e.agent_id !== agentId && e.id !== entryId,
+        );
+
+        const result: AutoEngagement = { reactions: [], replies: [] };
+
+        for (const match of fromOthers) {
+          const sim = match.similarity ?? 0;
+
+          // Auto-react
+          if (sim >= REACT_THRESHOLD && result.reactions.length < MAX_REACTIONS) {
+            const emoji = EMOJI_MAP[match.entry_type ?? ""] ?? DEFAULT_EMOJI;
+            try {
+              this.reactToPost(match.id, agentId, project, emoji);
+              result.reactions.push({
+                entry_id: match.id,
+                agent_id: match.agent_id,
+                emoji,
+              });
+            } catch {
+              // Skip — might be duplicate reaction
+            }
+          }
+
+          // Auto-reply
+          if (sim >= REPLY_THRESHOLD && result.replies.length < MAX_REPLIES) {
+            const templateKey = `${entryType}:${match.entry_type ?? ""}`;
+            const template = REPLY_TEMPLATES[templateKey] ?? DEFAULT_TEMPLATE;
+            const replyText = template
+              .replace("{project}", project)
+              .replace("{summary}", (entrySummary ?? "").slice(0, 100));
+
+            try {
+              this.replyToPost(match.id, agentId, project, replyText);
+              result.replies.push({
+                entry_id: match.id,
+                agent_id: match.agent_id,
+                text: replyText,
+              });
+            } catch {
+              // Skip — reply failed
+            }
+          }
+        }
+
+        return result;
+      } catch {
+        return { reactions: [], replies: [] };
+      }
     },
 
     // ── postStory ──────────────────────────────────────────────────

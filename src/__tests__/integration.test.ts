@@ -355,4 +355,100 @@ describe("v2 integration", () => {
       expect(entry.stale).toBeFalsy();
     }
   });
+
+  it("autoEngage creates reactions on semantically similar posts from other agents", async () => {
+    // Agent B posts first
+    svc.postInsight({
+      agentId: "proj/agent-b",
+      project: "proj",
+      text: "Hit a deadlock in sqlite with concurrent writers. WAL mode helps but doesn't fully solve it.",
+      tags: ["sqlite", "concurrency"],
+    });
+
+    // Let embeddings settle
+    await new Promise(r => setTimeout(r, 10));
+
+    // Agent A posts something similar
+    const { entry_id: aEntry } = svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Fixed a race condition in the sqlite WAL mode — two concurrent writes deadlocking.",
+      tags: ["bugfix", "sqlite"],
+    });
+
+    // Let embeddings settle
+    await new Promise(r => setTimeout(r, 50));
+
+    const result = await svc.autoEngage(
+      aEntry,
+      "proj/agent-a",
+      "Fixed a race condition in the sqlite WAL mode — two concurrent writes deadlocking.",
+      "proj",
+      "Fixed a race condition in the sqlite WAL mode",
+      "bugfix",
+    );
+
+    // Should have reacted to agent B's post (not agent A's own)
+    expect(result.reactions.length).toBeGreaterThanOrEqual(1);
+    expect(result.reactions.every(r => r.agent_id !== "proj/agent-a")).toBe(true);
+  });
+
+  it("autoEngage creates reply on highly similar posts", async () => {
+    // Agent B posts
+    svc.postInsight({
+      agentId: "proj/agent-b",
+      project: "proj",
+      text: "Discovered a race condition in the sqlite WAL lock — concurrent writes deadlock.",
+      tags: ["bugfix", "sqlite"],
+    });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Agent A posts very similar content
+    const { entry_id: aEntry } = svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Fixed the exact same sqlite WAL deadlock with concurrent writers.",
+      tags: ["bugfix", "sqlite"],
+    });
+
+    await new Promise(r => setTimeout(r, 50));
+
+    const result = await svc.autoEngage(
+      aEntry,
+      "proj/agent-a",
+      "Fixed the exact same sqlite WAL deadlock with concurrent writers.",
+      "proj",
+      "Fixed the exact same sqlite WAL deadlock with concurrent writers",
+      "bugfix",
+    );
+
+    // With mock embeddings (all identical), similarity = 1.0, so reply threshold met
+    expect(result.replies.length).toBe(1);
+    expect(result.replies[0].text).toContain("proj");
+  });
+
+  it("autoEngage returns empty when no similar posts from other agents exist", async () => {
+    // Agent A posts, no other agents exist
+    const { entry_id } = svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Working on something completely unique.",
+      tags: ["unique"],
+    });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const result = await svc.autoEngage(
+      entry_id,
+      "proj/agent-a",
+      "Working on something completely unique.",
+      "proj",
+      "Working on something completely unique",
+      "note",
+    );
+
+    expect(result.reactions).toEqual([]);
+    expect(result.replies).toEqual([]);
+  });
 });
