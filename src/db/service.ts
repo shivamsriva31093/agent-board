@@ -323,8 +323,9 @@ export function createService(db: Database.Database) {
       intent: string;
       maxTokens?: number;
     }): Promise<{
-      entries: (EntrySummary & { score: number })[];
+      entries: (EntrySummary & { score: number; stale?: boolean; superseded_by?: number })[];
       claims: ClaimWithAgent[];
+      conflicts: { scope: string; entries: { id: number; summary: string | null; entry_type: string | null; created_at: number }[] }[];
       truncated: boolean;
     }> {
       const maxTokens = params.maxTokens ?? 600;
@@ -336,7 +337,7 @@ export function createService(db: Database.Database) {
       try {
         queryEmbedding = await embedText(queryText);
       } catch {
-        return { entries: [], claims: [], truncated: false };
+        return { entries: [], claims: [], conflicts: [], truncated: false };
       }
 
       // 2. KNN search — over-fetch for filtering headroom
@@ -354,10 +355,12 @@ export function createService(db: Database.Database) {
       }[];
 
       // 3. Score and rank
-      const scored: (EntrySummary & { score: number })[] = [];
+      const scored: (EntrySummary & { score: number; stale?: boolean; superseded_by?: number })[] = [];
+      const scopesByEntryId = new Map<number, string[]>();
       for (const row of rows) {
         const entry = q.getEntry(row.entry_id);
         if (!entry) continue;
+        scopesByEntryId.set(entry.id, entry.parsed_scope);
 
         const similarity = 1 - row.distance;
 
@@ -399,6 +402,70 @@ export function createService(db: Database.Database) {
       // Sort by score descending
       scored.sort((a, b) => b.score - a.score);
 
+      // 3b. Detect staleness and conflicts within result set
+      const CONFLICT_TYPES = new Set(["decision", "pattern", "warning", "bugfix"]);
+      const conflictMap = new Map<string, { id: number; summary: string | null; entry_type: string | null; created_at: number }[]>();
+
+      for (let i = 0; i < scored.length; i++) {
+        const a = scored[i];
+        const aScopes = scopesByEntryId.get(a.id) ?? [];
+
+        for (let j = i + 1; j < scored.length; j++) {
+          const b = scored[j];
+          const bScopes = scopesByEntryId.get(b.id) ?? [];
+
+          // Check scope overlap
+          let sharedScope: string | null = null;
+          for (const sA of aScopes) {
+            for (const sB of bScopes) {
+              if (sA.startsWith(sB) || sB.startsWith(sA)) {
+                sharedScope = sA.length > sB.length ? sB : sA;
+                break;
+              }
+            }
+            if (sharedScope) break;
+          }
+          if (!sharedScope) continue;
+
+          // Staleness: older entry gets stale flag + score penalty
+          const [older, newer] = a.created_at <= b.created_at ? [a, b] : [b, a];
+          if (!older.stale) {
+            let stalePenalty = 0.1;
+            if (older.likes > 0 || older.reply_count > 0) {
+              stalePenalty *= 0.5;
+            }
+            older.score -= stalePenalty;
+            older.stale = true;
+            older.superseded_by = newer.id;
+          }
+
+          // Conflict: same conflictable type + >24h apart
+          if (
+            CONFLICT_TYPES.has(a.entry_type ?? "") &&
+            CONFLICT_TYPES.has(b.entry_type ?? "") &&
+            Math.abs(a.created_at - b.created_at) > 86400
+          ) {
+            const key = sharedScope;
+            if (!conflictMap.has(key)) conflictMap.set(key, []);
+            const group = conflictMap.get(key)!;
+            if (!group.some(e => e.id === a.id)) {
+              group.push({ id: a.id, summary: a.summary, entry_type: a.entry_type, created_at: a.created_at });
+            }
+            if (!group.some(e => e.id === b.id)) {
+              group.push({ id: b.id, summary: b.summary, entry_type: b.entry_type, created_at: b.created_at });
+            }
+          }
+        }
+      }
+
+      // Re-sort after stale penalties
+      scored.sort((a, b) => b.score - a.score);
+
+      const conflicts = Array.from(conflictMap.entries()).map(([scope, entries]) => ({
+        scope,
+        entries: entries.sort((a, b) => a.created_at - b.created_at),
+      }));
+
       // 4. Fetch claims overlapping input files
       const claimSet = new Map<number, ClaimWithAgent>();
       for (const file of params.files) {
@@ -412,7 +479,7 @@ export function createService(db: Database.Database) {
       // 5. Truncate to token budget
       let tokenEstimate = 0;
       let truncated = false;
-      const result: (EntrySummary & { score: number })[] = [];
+      const result: (EntrySummary & { score: number; stale?: boolean; superseded_by?: number })[] = [];
       for (const entry of scored) {
         const entryTokens = Math.ceil((entry.summary?.length ?? 0) / 4) + 15;
         if (tokenEstimate + entryTokens > maxTokens) {
@@ -423,7 +490,7 @@ export function createService(db: Database.Database) {
         result.push(entry);
       }
 
-      return { entries: result, claims, truncated };
+      return { entries: result, claims, conflicts, truncated };
     },
 
     // ── engagementSuggestions ─────────────────────────────────────
