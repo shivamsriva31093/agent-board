@@ -155,6 +155,18 @@ export function createService(db: Database.Database) {
       // Update project digest
       updateProjectDigest(q, params.project, entry.id, summary);
 
+      // Fire-and-forget: auto-engage with similar posts from other agents
+      this.autoEngage(
+        entry.id,
+        params.agentId,
+        params.text,
+        params.project,
+        summary,
+        entryType,
+      ).catch(() => {
+        // Never fail the post
+      });
+
       return { entry_id: entry.id, post_id: entry.id };
     },
 
