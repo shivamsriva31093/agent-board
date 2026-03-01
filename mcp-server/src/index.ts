@@ -179,9 +179,10 @@ server.tool(
         scope,
       })) as { post_id: number };
 
-      // Search for related posts from other agents
-      let relatedText = "";
+      // Check what auto-engagement happened on related posts
+      let engagementText = "";
       try {
+        await new Promise(r => setTimeout(r, 500));
         const searchQuery = encodeURIComponent(text.slice(0, 300));
         const related = (await boardGet(
           `/api/entries/search?q=${searchQuery}&limit=8`,
@@ -198,24 +199,55 @@ server.tool(
           .slice(0, 3);
 
         if (fromOthers.length > 0) {
-          relatedText = "\n\nRelated posts from other agents:\n";
-          fromOthers.forEach((e, i) => {
-            const age = timeAgo(e.created_at);
-            const type = e.entry_type ?? "note";
-            relatedText += `${i + 1}. [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
-          });
-          relatedText +=
-            "\n→ Use reply_to_post(id) to engage, or react_to_post(id) to react.";
+          const engaged: { id: number; agent_id: string; summary: string | null; entry_type: string | null; created_at: number; reacted: boolean; replied: boolean }[] = [];
+
+          for (const r of fromOthers) {
+            try {
+              const detail = (await boardGet(`/api/posts/${r.id}`)) as {
+                reactions: { agent_id: string; emoji: string }[];
+                replies: { agent_id: string; text: string }[];
+              };
+              const reacted = detail.reactions?.some(rx => rx.agent_id === agentId) ?? false;
+              const replied = detail.replies?.some(rp => rp.agent_id === agentId) ?? false;
+              if (reacted || replied) {
+                engaged.push({ ...r, reacted, replied });
+              }
+            } catch {
+              // skip
+            }
+          }
+
+          if (engaged.length > 0) {
+            engagementText = "\n\nAuto-engaged with related posts:\n";
+            for (const e of engaged) {
+              const age = timeAgo(e.created_at);
+              const type = e.entry_type ?? "note";
+              if (e.replied) {
+                engagementText += `\u2022 Replied to #${e.id} [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"}\n`;
+              } else if (e.reacted) {
+                engagementText += `\u2022 Reacted to #${e.id} [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"}\n`;
+              }
+            }
+            engagementText += "\u2192 Use reply_to_post(id) to add more context.";
+          } else {
+            engagementText = "\n\nRelated posts from other agents:\n";
+            fromOthers.forEach((e, i) => {
+              const age = timeAgo(e.created_at);
+              const type = e.entry_type ?? "note";
+              engagementText += `${i + 1}. [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
+            });
+            engagementText += "\n\u2192 Use reply_to_post(id) to engage, or react_to_post(id) to react.";
+          }
         }
       } catch {
-        // Non-critical — don't fail the post if search fails
+        // Non-critical — don't fail the post if engagement check fails
       }
 
       return {
         content: [
           {
             type: "text" as const,
-            text: `Posted insight (id: ${data.post_id})${relatedText}`,
+            text: `Posted insight (id: ${data.post_id})${engagementText}`,
           },
         ],
       };
