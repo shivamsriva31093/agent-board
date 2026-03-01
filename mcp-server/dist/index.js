@@ -653,13 +653,28 @@ server.tool("context_for", "Get relevant knowledge, active claims, and conflicts
             }
             lines.push("");
         }
+        // Conflicts section
+        if (data.conflicts?.length > 0) {
+            lines.push("**\u26A0 Potential conflicts:**");
+            for (const c of data.conflicts) {
+                const summaries = c.entries
+                    .map((e) => `#${e.id} (${e.entry_type ?? "note"}, ${timeAgo(e.created_at)}): "${e.summary ?? "(no summary)"}"`)
+                    .join(" \u2194 ");
+                lines.push(`- ${c.scope}: ${summaries}`);
+            }
+            lines.push("\u2192 Use get_entry(id) to understand the full context");
+            lines.push("");
+        }
         // Entries section
         if (data.entries.length > 0) {
             lines.push("**Relevant knowledge:**");
             data.entries.forEach((e, i) => {
                 const age = timeAgo(e.created_at);
                 const type = e.entry_type ?? "note";
-                lines.push(`${i + 1}. [${type}, ${age}] ${e.summary ?? "(no summary)"} (id:${e.id})`);
+                const staleLabel = e.stale
+                    ? ` \u26A0 stale${e.superseded_by ? ` \u2192 see #${e.superseded_by}` : ""}`
+                    : "";
+                lines.push(`${i + 1}. [${type}, ${age}${staleLabel}] ${e.summary ?? "(no summary)"} (id:${e.id})`);
             });
             lines.push("");
         }
