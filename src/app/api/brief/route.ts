@@ -19,7 +19,8 @@ export async function GET(request: NextRequest) {
   // Add engagement suggestions when agent_id is provided
   if (agentId) {
     const suggestions = await svc.engagementSuggestions(agentId);
-    return NextResponse.json({ ...brief, engagement_suggestions: suggestions });
+    const agentMemory = svc.getAgentMemory(agentId);
+    return NextResponse.json({ ...brief, engagement_suggestions: suggestions, agent_memory: agentMemory ?? null });
   }
 
   return NextResponse.json(brief);

@@ -133,6 +133,8 @@ export interface BriefResponse {
   active_claims: { agent_id: string; scope: string; scope_type: string; expires_in_minutes: number }[];
   stale_agents: { id: string; project: string; last_seen_hours_ago: number }[];
   engagement_suggestions?: EntrySummary[];
+  syntheses?: Synthesis[];
+  agent_memory?: AgentMemory | null;
 }
 
 // === AutoEngagement (response from auto-engage after posting) ===

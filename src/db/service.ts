@@ -12,6 +12,8 @@ import type {
   ClaimWithAgent,
   BriefResponse,
   AutoEngagement,
+  Synthesis,
+  AgentMemory,
 } from "@/lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -333,6 +335,11 @@ export function createService(db: Database.Database) {
       // 4. Get stale agents (active > 2 hours ago)
       const staleAgents = q.getStaleAgents(ts, 7200);
 
+      // 5. Get topic syntheses
+      const syntheses = project
+        ? q.getSynthesesByProject(project, 5)
+        : q.getAllSyntheses().slice(0, 5);
+
       return {
         digests: digests.map((d) => ({
           project: d.scope,
@@ -361,6 +368,7 @@ export function createService(db: Database.Database) {
             (ts - (a.status_updated_at ?? a.last_seen)) / 3600,
           ),
         })),
+        syntheses,
       };
     },
 
@@ -430,6 +438,7 @@ export function createService(db: Database.Database) {
       claims: ClaimWithAgent[];
       conflicts: { scope: string; entries: { id: number; summary: string | null; entry_type: string | null; created_at: number }[] }[];
       truncated: boolean;
+      syntheses: Synthesis[];
     }> {
       const maxTokens = params.maxTokens ?? 600;
       const ts = now();
@@ -440,7 +449,7 @@ export function createService(db: Database.Database) {
       try {
         queryEmbedding = await embedText(queryText);
       } catch {
-        return { entries: [], claims: [], conflicts: [], truncated: false };
+        return { entries: [], claims: [], conflicts: [], truncated: false, syntheses: [] };
       }
 
       // 2. KNN search — over-fetch for filtering headroom
@@ -579,6 +588,19 @@ export function createService(db: Database.Database) {
       }
       const claims = Array.from(claimSet.values());
 
+      // 4b. Fetch relevant syntheses for the queried files
+      const entryTags = new Set<string>();
+      for (const e of scored) {
+        const tags: string[] = Array.isArray(e.tags) ? e.tags : [];
+        tags.forEach((t: string) => entryTags.add(t));
+      }
+
+      const allSyntheses = q.getAllSyntheses();
+      const relevantSyntheses = allSyntheses.filter((s) =>
+        s.topic.split("-").some((word) => entryTags.has(word)) ||
+        entryTags.has(s.topic)
+      ).slice(0, 3);
+
       // 5. Truncate to token budget
       let tokenEstimate = 0;
       let truncated = false;
@@ -593,7 +615,7 @@ export function createService(db: Database.Database) {
         result.push(entry);
       }
 
-      return { entries: result, claims, conflicts, truncated };
+      return { entries: result, claims, conflicts, truncated, syntheses: relevantSyntheses };
     },
 
     // ── engagementSuggestions ─────────────────────────────────────
@@ -618,6 +640,19 @@ export function createService(db: Database.Database) {
 
       // 4. Filter to OTHER agents only
       return related.filter((e) => e.agent_id !== agentId).slice(0, limit);
+    },
+
+    // ── getSyntheses ────────────────────────────────────────────────
+
+    getSyntheses(project?: string, limit: number = 5): Synthesis[] {
+      if (project) return q.getSynthesesByProject(project, limit);
+      return q.getAllSyntheses().slice(0, limit);
+    },
+
+    // ── getAgentMemory ──────────────────────────────────────────────
+
+    getAgentMemory(agentId: string): AgentMemory | undefined {
+      return q.getAgentMemory(agentId);
     },
 
     // ── createClaim ────────────────────────────────────────────────
