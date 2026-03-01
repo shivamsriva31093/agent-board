@@ -12,6 +12,8 @@ import type {
   Claim,
   ClaimWithAgent,
   Digest,
+  Synthesis,
+  AgentMemory,
 } from "@/lib/types";
 
 export interface Queries {
@@ -56,6 +58,17 @@ export interface Queries {
   upsertDigest(digest: Omit<Digest, "id">): void;
   getDigest(scope: string, scopeType: string): Digest | undefined;
   getAllDigests(): Digest[];
+
+  // Syntheses
+  upsertSynthesis(s: { project: string; topic: string; synthesis_type: string; summary: string; entry_ids: string; entry_count: number; last_entry_id: number; created_at: number; updated_at: number }): void;
+  getSynthesesByProject(project: string, limit?: number): Synthesis[];
+  getSynthesesByTopic(project: string, topic: string): Synthesis[];
+  getAllSyntheses(): Synthesis[];
+  getLatestSynthesisEntryId(project: string): number;
+
+  // Agent Memory
+  upsertAgentMemory(m: { agent_id: string; knowledge_brief: string | null; expertise: string; top_scopes: string; entry_count: number; last_entry_id: number; updated_at: number }): void;
+  getAgentMemory(agentId: string): AgentMemory | undefined;
 }
 
 // ── Row type for agent join columns ────────────────────────────────
@@ -171,6 +184,21 @@ function hydrateEntry(
 }
 
 export function createQueries(db: Database.Database): Queries {
+  function hydrateSynthesis(row: any): Synthesis {
+    return {
+      ...row,
+      entry_ids: JSON.parse(row.entry_ids || "[]"),
+    };
+  }
+
+  function hydrateAgentMemory(row: any): AgentMemory {
+    return {
+      ...row,
+      expertise: JSON.parse(row.expertise || "{}"),
+      top_scopes: JSON.parse(row.top_scopes || "[]"),
+    };
+  }
+
   // ── Prepared statements ────────────────────────────────────────────
 
   // Agents
@@ -665,6 +693,64 @@ export function createQueries(db: Database.Database): Queries {
 
     getAllDigests() {
       return stmtGetAllDigests.all() as Digest[];
+    },
+
+    // ── Syntheses ──────────────────────────────────────────────────
+
+    upsertSynthesis(s) {
+      db.prepare(`
+        INSERT INTO syntheses (project, topic, synthesis_type, summary, entry_ids, entry_count, last_entry_id, created_at, updated_at)
+        VALUES (@project, @topic, @synthesis_type, @summary, @entry_ids, @entry_count, @last_entry_id, @created_at, @updated_at)
+        ON CONFLICT(project, topic, synthesis_type) DO UPDATE SET
+          summary = @summary, entry_ids = @entry_ids, entry_count = @entry_count,
+          last_entry_id = @last_entry_id, updated_at = @updated_at
+      `).run(s);
+    },
+
+    getSynthesesByProject(project, limit = 10) {
+      const rows = db.prepare(
+        `SELECT * FROM syntheses WHERE project = ? ORDER BY updated_at DESC LIMIT ?`
+      ).all(project, limit) as any[];
+      return rows.map(hydrateSynthesis);
+    },
+
+    getSynthesesByTopic(project, topic) {
+      const rows = db.prepare(
+        `SELECT * FROM syntheses WHERE project = ? AND topic = ? ORDER BY synthesis_type`
+      ).all(project, topic) as any[];
+      return rows.map(hydrateSynthesis);
+    },
+
+    getAllSyntheses() {
+      const rows = db.prepare(`SELECT * FROM syntheses ORDER BY updated_at DESC`).all() as any[];
+      return rows.map(hydrateSynthesis);
+    },
+
+    getLatestSynthesisEntryId(project) {
+      const row = db.prepare(
+        `SELECT MAX(last_entry_id) AS max_id FROM syntheses WHERE project = ?`
+      ).get(project) as { max_id: number | null } | undefined;
+      return row?.max_id ?? 0;
+    },
+
+    // ── Agent Memory ───────────────────────────────────────────────
+
+    upsertAgentMemory(m) {
+      db.prepare(`
+        INSERT INTO agent_memory (agent_id, knowledge_brief, expertise, top_scopes, entry_count, last_entry_id, updated_at)
+        VALUES (@agent_id, @knowledge_brief, @expertise, @top_scopes, @entry_count, @last_entry_id, @updated_at)
+        ON CONFLICT(agent_id) DO UPDATE SET
+          knowledge_brief = @knowledge_brief, expertise = @expertise, top_scopes = @top_scopes,
+          entry_count = @entry_count, last_entry_id = @last_entry_id, updated_at = @updated_at
+      `).run(m);
+    },
+
+    getAgentMemory(agentId) {
+      const row = db.prepare(
+        `SELECT * FROM agent_memory WHERE agent_id = ?`
+      ).get(agentId) as any | undefined;
+      if (!row) return undefined;
+      return hydrateAgentMemory(row);
     },
   };
 }

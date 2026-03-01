@@ -1081,3 +1081,66 @@ describe("digests", () => {
     expect(all).toHaveLength(2);
   });
 });
+
+// ── Syntheses ────────────────────────────────────────────────────────
+
+describe("syntheses", () => {
+  it("upsertSynthesis inserts and updates", () => {
+    q.upsertSynthesis({
+      project: "proj", topic: "sqlite-concurrency", synthesis_type: "topic",
+      summary: "Mutex + retry is the consensus.", entry_ids: "[1,2,3]",
+      entry_count: 3, last_entry_id: 3, created_at: 1000, updated_at: 1000,
+    });
+    const all = q.getSynthesesByProject("proj");
+    expect(all).toHaveLength(1);
+    expect(all[0].summary).toBe("Mutex + retry is the consensus.");
+    expect(all[0].entry_ids).toEqual([1, 2, 3]);
+
+    // Update
+    q.upsertSynthesis({
+      project: "proj", topic: "sqlite-concurrency", synthesis_type: "topic",
+      summary: "Updated consensus.", entry_ids: "[1,2,3,4]",
+      entry_count: 4, last_entry_id: 4, created_at: 1000, updated_at: 2000,
+    });
+    const updated = q.getSynthesesByProject("proj");
+    expect(updated).toHaveLength(1);
+    expect(updated[0].summary).toBe("Updated consensus.");
+  });
+
+  it("getLatestSynthesisEntryId returns watermark", () => {
+    expect(q.getLatestSynthesisEntryId("proj")).toBe(0);
+    q.upsertSynthesis({
+      project: "proj", topic: "t1", synthesis_type: "topic",
+      summary: "s", entry_ids: "[5]", entry_count: 1, last_entry_id: 5,
+      created_at: 1000, updated_at: 1000,
+    });
+    expect(q.getLatestSynthesisEntryId("proj")).toBe(5);
+  });
+});
+
+// ── Agent Memory ─────────────────────────────────────────────────────
+
+describe("agent_memory", () => {
+  it("upsertAgentMemory inserts and retrieves", () => {
+    // Need an agent first
+    q.upsertAgent({ id: "proj/test-agent", project: "proj", agent_type: null, avatar_seed: "abc", first_seen: 1000, last_seen: 1000 });
+
+    q.upsertAgentMemory({
+      agent_id: "proj/test-agent",
+      knowledge_brief: "You worked on sqlite concurrency.",
+      expertise: '{"sqlite": 5, "docker": 2}',
+      top_scopes: '["src/db/"]',
+      entry_count: 7, last_entry_id: 10, updated_at: 1000,
+    });
+
+    const mem = q.getAgentMemory("proj/test-agent");
+    expect(mem).toBeDefined();
+    expect(mem!.knowledge_brief).toBe("You worked on sqlite concurrency.");
+    expect(mem!.expertise).toEqual({ sqlite: 5, docker: 2 });
+    expect(mem!.top_scopes).toEqual(["src/db/"]);
+  });
+
+  it("getAgentMemory returns undefined for unknown agent", () => {
+    expect(q.getAgentMemory("unknown")).toBeUndefined();
+  });
+});

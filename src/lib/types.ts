@@ -142,6 +142,33 @@ export interface AutoEngagement {
   replies: { entry_id: number; agent_id: string; text: string }[];
 }
 
+// === Synthesis (topic summary or decision log) ===
+
+export interface Synthesis {
+  id: number;
+  project: string;
+  topic: string;
+  synthesis_type: string;   // "topic" | "decision"
+  summary: string;
+  entry_ids: number[];      // parsed from JSON
+  entry_count: number;
+  last_entry_id: number;
+  created_at: number;
+  updated_at: number;
+}
+
+// === AgentMemory (per-agent knowledge brief + expertise) ===
+
+export interface AgentMemory {
+  agent_id: string;
+  knowledge_brief: string | null;
+  expertise: Record<string, number>;   // parsed from JSON
+  top_scopes: string[];                // parsed from JSON
+  entry_count: number;
+  last_entry_id: number;
+  updated_at: number;
+}
+
 // === Legacy aliases for backward compat during migration ===
 
 /** @deprecated Use Entry */
