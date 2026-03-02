@@ -16,6 +16,36 @@ import type {
   AgentMemory,
 } from "@/lib/types";
 
+// Analytics aggregation types
+export interface AnalyticsActivity {
+  date: string;
+  count: number;
+}
+
+export interface AnalyticsAgent {
+  agent_id: string;
+  entries: number;
+  reactions: number;
+  replies: number;
+}
+
+export interface AnalyticsEntryType {
+  entry_type: string;
+  count: number;
+}
+
+export interface AnalyticsExpertise {
+  agent_id: string;
+  tags: Record<string, number>;
+}
+
+export interface AnalyticsData {
+  activity: AnalyticsActivity[];
+  agents: AnalyticsAgent[];
+  types: AnalyticsEntryType[];
+  expertise: AnalyticsExpertise[];
+}
+
 export interface Queries {
   // Agents
   upsertAgent(agent: Omit<Agent, "first_seen" | "last_seen" | "status" | "current_task" | "status_updated_at"> & { first_seen?: number; last_seen?: number }): Agent;
@@ -69,6 +99,9 @@ export interface Queries {
   // Agent Memory
   upsertAgentMemory(m: { agent_id: string; knowledge_brief: string | null; expertise: string; top_scopes: string; entry_count: number; last_entry_id: number; updated_at: number }): void;
   getAgentMemory(agentId: string): AgentMemory | undefined;
+
+  // Analytics
+  getAnalytics(days?: number): AnalyticsData;
 }
 
 // ── Row type for agent join columns ────────────────────────────────
@@ -751,6 +784,60 @@ export function createQueries(db: Database.Database): Queries {
       ).get(agentId) as any | undefined;
       if (!row) return undefined;
       return hydrateAgentMemory(row);
+    },
+
+    // ── Analytics ───────────────────────────────────────────────────
+
+    getAnalytics(days = 30): AnalyticsData {
+      const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+
+      // 1. Activity: posts per day
+      const activity = db.prepare(`
+        SELECT date(created_at, 'unixepoch') AS date, COUNT(*) AS count
+        FROM entries
+        WHERE created_at > ?
+        GROUP BY date
+        ORDER BY date ASC
+      `).all(cutoff) as AnalyticsActivity[];
+
+      // 2. Top agents by entries + reactions received + replies received
+      const agents = db.prepare(`
+        SELECT
+          e.agent_id,
+          COUNT(DISTINCT e.id) AS entries,
+          (SELECT COUNT(*) FROM reactions r WHERE r.post_id IN (
+            SELECT id FROM entries WHERE agent_id = e.agent_id
+          )) AS reactions,
+          (SELECT COUNT(*) FROM replies rp WHERE rp.post_id IN (
+            SELECT id FROM entries WHERE agent_id = e.agent_id
+          )) AS replies
+        FROM entries e
+        WHERE e.created_at > ?
+        GROUP BY e.agent_id
+        ORDER BY entries DESC
+        LIMIT 10
+      `).all(cutoff) as AnalyticsAgent[];
+
+      // 3. Entry type distribution
+      const types = db.prepare(`
+        SELECT COALESCE(entry_type, 'note') AS entry_type, COUNT(*) AS count
+        FROM entries
+        WHERE created_at > ?
+        GROUP BY entry_type
+        ORDER BY count DESC
+      `).all(cutoff) as AnalyticsEntryType[];
+
+      // 4. Agent expertise from agent_memory table
+      const expertiseRows = db.prepare(`
+        SELECT agent_id, expertise FROM agent_memory WHERE expertise != '{}'
+      `).all() as { agent_id: string; expertise: string }[];
+
+      const expertise: AnalyticsExpertise[] = expertiseRows.map(row => ({
+        agent_id: row.agent_id,
+        tags: JSON.parse(row.expertise),
+      }));
+
+      return { activity, agents, types, expertise };
     },
   };
 }

@@ -1144,3 +1144,76 @@ describe("agent_memory", () => {
     expect(q.getAgentMemory("unknown")).toBeUndefined();
   });
 });
+
+// ── Analytics ─────────────────────────────────────────────────────────
+
+describe("analytics", () => {
+  it("getAnalytics returns activity, agents, types, and expertise data", () => {
+    // Setup: create two agents
+    q.upsertAgent({ id: "proj/a1", project: "proj", agent_type: null, avatar_seed: "a1" });
+    q.upsertAgent({ id: "proj/a2", project: "proj", agent_type: null, avatar_seed: "a2" });
+
+    const now = Math.floor(Date.now() / 1000);
+
+    // Insert entries from both agents
+    const e1 = q.insertEntry({
+      agent_id: "proj/a1", text: "Fixed a bug", summary: "Fixed a bug",
+      entry_type: "bugfix", scope: null, mood: null, code_block: null,
+      screenshot: null, tags: '["sqlite"]', created_at: now,
+    });
+    const e2 = q.insertEntry({
+      agent_id: "proj/a1", text: "Shipped feature", summary: "Shipped feature",
+      entry_type: "shipped", scope: null, mood: null, code_block: null,
+      screenshot: null, tags: '["frontend"]', created_at: now - 86400,
+    });
+    q.insertEntry({
+      agent_id: "proj/a2", text: "Discovery about perf", summary: "Discovery about perf",
+      entry_type: "discovery", scope: null, mood: null, code_block: null,
+      screenshot: null, tags: '["perf"]', created_at: now,
+    });
+
+    // Add a reaction
+    q.insertReaction({ post_id: e1.id, agent_id: "proj/a2", emoji: "\uD83D\uDD27" });
+
+    // Add agent memory for expertise
+    q.upsertAgentMemory({
+      agent_id: "proj/a1",
+      knowledge_brief: "Test brief",
+      expertise: JSON.stringify({ sqlite: 5, frontend: 3 }),
+      top_scopes: JSON.stringify(["sqlite", "frontend"]),
+      entry_count: 2,
+      last_entry_id: e2.id,
+      updated_at: now,
+    });
+
+    const analytics = q.getAnalytics(30);
+
+    // Activity: should have entries for today and yesterday
+    expect(analytics.activity.length).toBeGreaterThanOrEqual(2);
+    expect(analytics.activity.some(a => a.count > 0)).toBe(true);
+
+    // Agents: both agents should appear
+    expect(analytics.agents.length).toBe(2);
+    const a1 = analytics.agents.find(a => a.agent_id === "proj/a1");
+    expect(a1).toBeDefined();
+    expect(a1!.entries).toBe(2);
+
+    // Types: should have bugfix, shipped, discovery
+    expect(analytics.types.length).toBe(3);
+    expect(analytics.types.some(t => t.entry_type === "bugfix" && t.count === 1)).toBe(true);
+
+    // Expertise: should have proj/a1 with parsed tags
+    expect(analytics.expertise.length).toBeGreaterThanOrEqual(1);
+    const exp = analytics.expertise.find(e => e.agent_id === "proj/a1");
+    expect(exp).toBeDefined();
+    expect(exp!.tags.sqlite).toBe(5);
+  });
+
+  it("getAnalytics returns empty arrays when no data", () => {
+    const analytics = q.getAnalytics(30);
+    expect(analytics.activity).toEqual([]);
+    expect(analytics.agents).toEqual([]);
+    expect(analytics.types).toEqual([]);
+    expect(analytics.expertise).toEqual([]);
+  });
+});
