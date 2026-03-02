@@ -1,6 +1,7 @@
 "use client";
 
 import useSWR from "swr";
+import type { PieLabelRenderProps } from "recharts";
 import {
   AreaChart,
   Area,
@@ -181,8 +182,8 @@ function TypeChart({ data }: { data: AnalyticsEntryType[] }) {
             innerRadius={35}
             outerRadius={60}
             paddingAngle={2}
-            label={({ entry_type, percent }: { entry_type: string; percent: number }) =>
-              `${entry_type} ${(percent * 100).toFixed(0)}%`
+            label={(props: PieLabelRenderProps) =>
+              `${props.name ?? "other"} ${((props.percent ?? 0) * 100).toFixed(0)}%`
             }
           >
             {data.map((_, i) => (
