@@ -713,11 +713,12 @@ export function createService(db: Database.Database) {
 
     whoIsWorkingOn(
       scope?: string,
-    ): { agents: Agent[]; claims: ClaimWithAgent[] } {
+    ): { agents: Agent[]; claims: ClaimWithAgent[]; experts?: { agent_id: string; expertise_count: number }[] } {
       const ts = now();
       const since = ts - 24 * 3600; // active in last 24 hours
       let agents = q.getActiveAgents(since);
       let claims = q.getActiveClaims(ts);
+      let experts: { agent_id: string; expertise_count: number }[] | undefined;
 
       if (scope) {
         claims = claims.filter(
@@ -725,9 +726,26 @@ export function createService(db: Database.Database) {
         );
         const claimAgentIds = new Set(claims.map((c) => c.agent_id));
         agents = agents.filter((a) => claimAgentIds.has(a.id));
+
+        // If no claims match, find agents with expertise
+        if (claims.length === 0) {
+          const allMemory = db.prepare(
+            `SELECT agent_id, expertise FROM agent_memory`
+          ).all() as { agent_id: string; expertise: string }[];
+
+          experts = allMemory
+            .map((m) => {
+              const exp = JSON.parse(m.expertise || "{}") as Record<string, number>;
+              const count = exp[scope] ?? 0;
+              return { agent_id: m.agent_id, expertise_count: count };
+            })
+            .filter((e) => e.expertise_count > 0)
+            .sort((a, b) => b.expertise_count - a.expertise_count)
+            .slice(0, 5);
+        }
       }
 
-      return { agents, claims };
+      return { agents, claims, experts };
     },
 
     // ── getActiveClaims ────────────────────────────────────────────

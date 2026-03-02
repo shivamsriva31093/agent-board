@@ -488,6 +488,15 @@ server.tool(
         output += "\n";
       }
 
+      if (brief.syntheses?.length) {
+        output += "Knowledge:\n";
+        for (const s of brief.syntheses) {
+          const typeLabel = s.synthesis_type === "decision" ? "\u{1F4CB}" : "\u{1F4A1}";
+          output += `${typeLabel} ${s.topic} (${s.entry_count} entries): ${s.summary}\n`;
+        }
+        output += "\n";
+      }
+
       if (brief.active_agents?.length) {
         output += "Active Agents:\n";
         for (const a of brief.active_agents) {
@@ -525,6 +534,10 @@ server.tool(
 
       if (!brief.digests?.length && !brief.active_agents?.length) {
         output += "No recent activity.";
+      }
+
+      if (brief.agent_memory?.knowledge_brief) {
+        output = `Your previous work:\n${brief.agent_memory.knowledge_brief}\n\nExpertise: ${brief.agent_memory.top_scopes?.join(", ") || "unknown"}\n\n` + output;
       }
 
       return { content: [{ type: "text" as const, text: output }] };
@@ -806,6 +819,29 @@ server.tool(
         }
       }
 
+      // Expertise fallback when no claims match
+      if (scope && claims.length === 0) {
+        try {
+          const search = await boardGet(`/api/entries/search?q=${encodeURIComponent(scope)}&limit=10`);
+          if (search?.length) {
+            // Group by agent and count
+            const agentCounts = new Map<string, number>();
+            for (const e of search) {
+              agentCounts.set(e.agent_id, (agentCounts.get(e.agent_id) ?? 0) + 1);
+            }
+            if (agentCounts.size > 0) {
+              output += "\nAgents with expertise:\n";
+              const sorted = Array.from(agentCounts.entries()).sort((a, b) => b[1] - a[1]);
+              for (const [aid, count] of sorted.slice(0, 5)) {
+                output += `\u2022 ${aid} (${count} entries)\n`;
+              }
+            }
+          }
+        } catch {
+          // Non-critical
+        }
+      }
+
       if (!output) output = "No active agents or claims.";
 
       return { content: [{ type: "text" as const, text: output }] };
@@ -877,11 +913,28 @@ server.tool(
           scope: string;
           entries: { id: number; summary: string | null; entry_type: string | null; created_at: number }[];
         }[];
+        syntheses?: {
+          topic: string;
+          synthesis_type: string;
+          summary: string;
+          entry_count: number;
+          entry_ids: number[];
+        }[];
         truncated: boolean;
       };
 
       const nowSec = Math.floor(Date.now() / 1000);
       const lines: string[] = [];
+
+      // Syntheses section
+      if (data.syntheses?.length) {
+        lines.push("**Synthesized knowledge:**");
+        for (const s of data.syntheses) {
+          const typeLabel = s.synthesis_type === "decision" ? "\u{1F4CB}" : "\u{1F4A1}";
+          lines.push(`${typeLabel} ${s.topic}: ${s.summary}`);
+        }
+        lines.push("");
+      }
 
       // Claims section
       if (data.claims.length > 0) {
