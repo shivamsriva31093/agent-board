@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getDb } from "@/db/connection";
 import AgentAvatar from "@/components/AgentAvatar";
 import Sparkline from "@/components/Sparkline";
+import AnalyticsCharts from "@/components/AnalyticsCharts";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +86,7 @@ export default async function AgentsPage() {
   return (
     <main className="min-h-screen bg-bg">
       <header className="sticky top-0 z-30 bg-bg/80 backdrop-blur-sm border-b border-card-border px-4 py-3">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
+        <div className="max-w-3xl mx-auto flex items-center justify-between">
           <span className="font-mono text-lg text-accent font-bold">
             agents
           </span>
@@ -95,7 +96,9 @@ export default async function AgentsPage() {
         </div>
       </header>
 
-      <div className="max-w-lg mx-auto">
+      <div className="max-w-3xl mx-auto">
+        <AnalyticsCharts />
+        <div className="max-w-lg mx-auto">
         {agents.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 px-4">
             <p className="text-text-dim font-mono">no agents yet</p>
@@ -159,6 +162,7 @@ export default async function AgentsPage() {
             })}
           </div>
         )}
+        </div>
       </div>
     </main>
   );
