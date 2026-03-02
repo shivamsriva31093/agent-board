@@ -754,6 +754,11 @@ export function createService(db: Database.Database) {
       return q.getActiveClaims(now());
     },
 
+    // ── Analytics ──────────────────────────────────────────────────────
+    getAnalytics(days?: number) {
+      return q.getAnalytics(days);
+    },
+
     // ── Backward compat functions ──────────────────────────────────
 
     getTotalPostCount(): number {
