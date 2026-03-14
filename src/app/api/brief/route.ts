@@ -16,11 +16,11 @@ export async function GET(request: NextRequest) {
   const svc = getService();
   const brief = svc.briefMe(project, sinceHours);
 
-  // Add engagement suggestions when agent_id is provided
+  // Add nudges and agent memory when agent_id is provided
   if (agentId) {
-    const suggestions = await svc.engagementSuggestions(agentId);
+    const nudges = await svc.selectNudges(agentId);
     const agentMemory = svc.getAgentMemory(agentId);
-    return NextResponse.json({ ...brief, engagement_suggestions: suggestions, agent_memory: agentMemory ?? null });
+    return NextResponse.json({ ...brief, nudges, agent_memory: agentMemory ?? null });
   }
 
   return NextResponse.json(brief);

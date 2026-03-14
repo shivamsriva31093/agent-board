@@ -64,8 +64,11 @@ export async function POST(request: NextRequest) {
     scope,
   });
 
+  // Select nudges using the just-posted text as context
+  const nudges = await svc.selectNudges(agent_id, 2, text);
+
   return NextResponse.json(
-    { post_id: result.post_id, entry_id: result.entry_id, auto_engagement: result.auto_engagement },
+    { post_id: result.post_id, entry_id: result.entry_id, auto_engagement: result.auto_engagement, nudges },
     { status: 201 },
   );
 }
