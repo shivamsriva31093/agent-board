@@ -108,7 +108,7 @@ export function createService(db: Database.Database) {
   return {
     // ── postInsight ────────────────────────────────────────────────
 
-    postInsight(params: {
+    async postInsight(params: {
       agentId: string;
       project: string;
       agentType?: string;
@@ -118,7 +118,7 @@ export function createService(db: Database.Database) {
       screenshotPath?: string;
       tags?: string[];
       scope?: string[];
-    }): { entry_id: number; post_id: number } {
+    }): Promise<{ entry_id: number; post_id: number; auto_engagement: AutoEngagement }> {
       ensureAgent(q, params.agentId, params.project, params.agentType);
 
       const summary = extractSummary(params.text);
@@ -157,19 +157,23 @@ export function createService(db: Database.Database) {
       // Update project digest
       updateProjectDigest(q, params.project, entry.id, summary);
 
-      // Fire-and-forget: auto-engage with similar posts from other agents
-      this.autoEngage(
-        entry.id,
-        params.agentId,
-        params.text,
-        params.project,
-        summary,
-        entryType,
-      ).catch((err) => {
+      // Await auto-engage (no longer fire-and-forget)
+      let auto_engagement: AutoEngagement;
+      try {
+        auto_engagement = await this.autoEngage(
+          entry.id,
+          params.agentId,
+          params.text,
+          params.project,
+          summary,
+          entryType,
+        );
+      } catch (err) {
         console.warn("[auto-engage] failed:", (err as Error).message);
-      });
+        auto_engagement = { reactions: [], replies: [] };
+      }
 
-      return { entry_id: entry.id, post_id: entry.id };
+      return { entry_id: entry.id, post_id: entry.id, auto_engagement };
     },
 
     // ── autoEngage ──────────────────────────────────────────────────
@@ -184,10 +188,10 @@ export function createService(db: Database.Database) {
       entrySummary: string,
       entryType: string,
     ): Promise<AutoEngagement> {
-      const REACT_THRESHOLD = 0.3;
-      const REPLY_THRESHOLD = 0.5;
+      const REACT_THRESHOLD = 0.25;
+      const REPLY_THRESHOLD = 0.4;
       const MAX_REACTIONS = 2;
-      const MAX_REPLIES = 1;
+      const MAX_REPLIES = 2;
 
       const EMOJI_MAP: Record<string, string> = {
         bugfix: "\u{1F527}",
@@ -876,7 +880,7 @@ export function getActiveStories(): StoryWithAgent[] {
   return getService().getActiveStories();
 }
 
-export function postInsight(params: {
+export async function postInsight(params: {
   agentId: string;
   project: string;
   agentType?: string;
@@ -886,9 +890,9 @@ export function postInsight(params: {
   screenshotPath?: string;
   tags?: string[];
   scope?: string[];
-}): { post_id: number } {
-  const { post_id } = getService().postInsight(params);
-  return { post_id };
+}): Promise<{ post_id: number; entry_id: number; auto_engagement: AutoEngagement }> {
+  const result = await getService().postInsight(params);
+  return { post_id: result.post_id, entry_id: result.entry_id, auto_engagement: result.auto_engagement };
 }
 
 export function getFeed(

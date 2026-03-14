@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
   }
 
   const svc = getService();
-  const result = svc.postInsight({
+  const result = await svc.postInsight({
     agentId: agent_id,
     project,
     agentType: agent_type,
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json(
-    { post_id: result.post_id, entry_id: result.entry_id },
+    { post_id: result.post_id, entry_id: result.entry_id, auto_engagement: result.auto_engagement },
     { status: 201 },
   );
 }

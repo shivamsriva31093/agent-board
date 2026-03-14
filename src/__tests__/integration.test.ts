@@ -16,9 +16,9 @@ describe("v2 integration", () => {
     svc = createService(createTestDb());
   });
 
-  it("full lifecycle: post → enrich → brief → claim → conflict → release", () => {
+  it("full lifecycle: post → enrich → brief → claim → conflict → release", async () => {
     // 1. Post insight
-    const { entry_id } = svc.postInsight({
+    const { entry_id } = await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Fixed a race condition in the worker pool. Two jobs sharing one page.",
@@ -89,18 +89,18 @@ describe("v2 integration", () => {
     expect(who.agents[0].status).toBe("active");
   });
 
-  it("multiple posts build up project digest", () => {
-    svc.postInsight({
+  it("multiple posts build up project digest", async () => {
+    await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Discovered a memory leak in the connection pool.",
     });
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Decided to use Redis for caching instead of in-memory.",
     });
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/other-def",
       project: "proj",
       text: "Shipped the new dashboard feature.",
@@ -121,8 +121,8 @@ describe("v2 integration", () => {
     expect(stories[0].mood).toBe("focused");
   });
 
-  it("replies and reactions still work", () => {
-    const { entry_id } = svc.postInsight({
+  it("replies and reactions still work", async () => {
+    const { entry_id } = await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Found a pattern for error boundaries.",
@@ -140,21 +140,21 @@ describe("v2 integration", () => {
 
   it("contextFor returns relevant entries, claims, and conflicts", async () => {
     // Seed data
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Fixed a race condition in queries.ts — two concurrent writes deadlocking on WAL.",
       scope: ["src/db/queries.ts"],
       tags: ["bugfix", "sqlite"],
     });
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Decided to use cursor-based pagination over offset for the feed.",
       scope: ["src/db/queries.ts"],
       tags: ["decision"],
     });
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/other-def",
       project: "proj",
       text: "Shipped the new dashboard feature with charts.",
@@ -186,7 +186,7 @@ describe("v2 integration", () => {
   it("contextFor respects max_tokens budget", async () => {
     // Seed many entries
     for (let i = 0; i < 20; i++) {
-      svc.postInsight({
+      await svc.postInsight({
         agentId: "proj/main-abc",
         project: "proj",
         text: `Entry ${i}: some knowledge about the system that is moderately relevant to utility functions and helpers.`,
@@ -210,7 +210,7 @@ describe("v2 integration", () => {
 
   it("engagementSuggestions returns posts from OTHER agents related to agent's work", async () => {
     // Agent A posts about sqlite
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/agent-a",
       project: "proj",
       text: "Fixed a race condition in the sqlite WAL mode — two concurrent writes deadlocking.",
@@ -218,7 +218,7 @@ describe("v2 integration", () => {
     });
 
     // Agent B posts about similar topic
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/agent-b",
       project: "proj",
       text: "Hit a deadlock in sqlite with concurrent writers. WAL mode helps but doesn't fully solve it.",
@@ -226,7 +226,7 @@ describe("v2 integration", () => {
     });
 
     // Agent C posts about unrelated topic
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/agent-c",
       project: "proj",
       text: "Shipped the new dashboard with real-time charts using recharts library.",
@@ -249,7 +249,7 @@ describe("v2 integration", () => {
   });
 
   it("contextFor flags older entries as stale when newer entry shares scope", async () => {
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Decided to use cursor-based pagination over offset for the feed.",
@@ -257,7 +257,7 @@ describe("v2 integration", () => {
       tags: ["decision"],
     });
 
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/other-def",
       project: "proj",
       text: "Switched back to offset pagination — cursor pagination was over-engineered for our scale.",
@@ -299,7 +299,7 @@ describe("v2 integration", () => {
     // we test that the conflicts array exists and is properly typed.
     // In production, entries posted days apart will trigger conflicts.
 
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Decided to use cursor-based pagination.",
@@ -307,7 +307,7 @@ describe("v2 integration", () => {
       tags: ["decision"],
     });
 
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/other-def",
       project: "proj",
       text: "Decided to switch back to offset pagination.",
@@ -329,14 +329,14 @@ describe("v2 integration", () => {
   });
 
   it("contextFor does not flag entries without scope overlap as stale", async () => {
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/main-abc",
       project: "proj",
       text: "Fixed auth bug in login handler.",
       scope: ["src/auth/login.ts"],
     });
 
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/other-def",
       project: "proj",
       text: "Refactored the database query layer.",
@@ -358,7 +358,7 @@ describe("v2 integration", () => {
 
   it("autoEngage creates reactions on semantically similar posts from other agents", async () => {
     // Agent B posts first
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/agent-b",
       project: "proj",
       text: "Hit a deadlock in sqlite with concurrent writers. WAL mode helps but doesn't fully solve it.",
@@ -369,7 +369,7 @@ describe("v2 integration", () => {
     await new Promise(r => setTimeout(r, 10));
 
     // Agent A posts something similar
-    const { entry_id: aEntry } = svc.postInsight({
+    const { entry_id: aEntry } = await svc.postInsight({
       agentId: "proj/agent-a",
       project: "proj",
       text: "Fixed a race condition in the sqlite WAL mode — two concurrent writes deadlocking.",
@@ -395,7 +395,7 @@ describe("v2 integration", () => {
 
   it("autoEngage creates reply on highly similar posts", async () => {
     // Agent B posts
-    svc.postInsight({
+    await svc.postInsight({
       agentId: "proj/agent-b",
       project: "proj",
       text: "Discovered a race condition in the sqlite WAL lock — concurrent writes deadlock.",
@@ -405,7 +405,7 @@ describe("v2 integration", () => {
     await new Promise(r => setTimeout(r, 10));
 
     // Agent A posts very similar content
-    const { entry_id: aEntry } = svc.postInsight({
+    const { entry_id: aEntry } = await svc.postInsight({
       agentId: "proj/agent-a",
       project: "proj",
       text: "Fixed the exact same sqlite WAL deadlock with concurrent writers.",
@@ -430,7 +430,7 @@ describe("v2 integration", () => {
 
   it("autoEngage returns empty when no similar posts from other agents exist", async () => {
     // Agent A posts, no other agents exist
-    const { entry_id } = svc.postInsight({
+    const { entry_id } = await svc.postInsight({
       agentId: "proj/agent-a",
       project: "proj",
       text: "Working on something completely unique.",
@@ -450,5 +450,32 @@ describe("v2 integration", () => {
 
     expect(result.reactions).toEqual([]);
     expect(result.replies).toEqual([]);
+  });
+
+  it("postInsight returns auto_engagement results", async () => {
+    // Post from agent A
+    await svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Fixed a race condition in the worker pool",
+      tags: ["concurrency"],
+    });
+
+    // Wait for embedding to complete
+    await new Promise(r => setTimeout(r, 200));
+
+    // Post from agent B on similar topic
+    const result = await svc.postInsight({
+      agentId: "proj/agent-b",
+      project: "proj",
+      text: "Debugging a race condition in our job queue workers",
+      tags: ["concurrency"],
+    });
+
+    expect(result.entry_id).toBeGreaterThan(0);
+    expect(result.post_id).toEqual(result.entry_id);
+    expect(result.auto_engagement).toBeDefined();
+    expect(result.auto_engagement.reactions).toBeInstanceOf(Array);
+    expect(result.auto_engagement.replies).toBeInstanceOf(Array);
   });
 });
