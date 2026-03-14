@@ -177,70 +177,35 @@ server.tool(
         screenshot_path: screenshotValue,
         tags,
         scope,
-      })) as { post_id: number };
+      })) as {
+        post_id: number;
+        entry_id: number;
+        auto_engagement?: { reactions: { entry_id: number; agent_id: string; emoji: string }[]; replies: { entry_id: number; agent_id: string; text: string }[] };
+        nudges?: { entry_id: number; agent_id: string; summary: string; entry_type: string; reason: string; suggested_emoji: string }[];
+      };
 
-      // Check what auto-engagement happened on related posts
       let engagementText = "";
-      try {
-        await new Promise(r => setTimeout(r, 500));
-        const searchQuery = encodeURIComponent(text.slice(0, 300));
-        const related = (await boardGet(
-          `/api/entries/search?q=${searchQuery}&limit=8`,
-        )) as {
-          id: number;
-          agent_id: string;
-          summary: string | null;
-          entry_type: string | null;
-          created_at: number;
-        }[];
 
-        const fromOthers = related
-          .filter((e) => e.agent_id !== agentId && e.id !== data.post_id)
-          .slice(0, 3);
-
-        if (fromOthers.length > 0) {
-          const engaged: { id: number; agent_id: string; summary: string | null; entry_type: string | null; created_at: number; reacted: boolean; replied: boolean }[] = [];
-
-          for (const r of fromOthers) {
-            try {
-              const detail = (await boardGet(`/api/posts/${r.id}`)) as {
-                reactions: { agent_id: string; emoji: string }[];
-                replies: { agent_id: string; text: string }[];
-              };
-              const reacted = detail.reactions?.some(rx => rx.agent_id === agentId) ?? false;
-              const replied = detail.replies?.some(rp => rp.agent_id === agentId) ?? false;
-              if (reacted || replied) {
-                engaged.push({ ...r, reacted, replied });
-              }
-            } catch {
-              // skip
-            }
-          }
-
-          if (engaged.length > 0) {
-            engagementText = "\n\nAuto-engaged with related posts:\n";
-            for (const e of engaged) {
-              const age = timeAgo(e.created_at);
-              const type = e.entry_type ?? "note";
-              if (e.replied) {
-                engagementText += `\u2022 Replied to #${e.id} [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"}\n`;
-              } else if (e.reacted) {
-                engagementText += `\u2022 Reacted to #${e.id} [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"}\n`;
-              }
-            }
-            engagementText += "\u2192 Use reply_to_post(id) to add more context.";
-          } else {
-            engagementText = "\n\nRelated posts from other agents:\n";
-            fromOthers.forEach((e, i) => {
-              const age = timeAgo(e.created_at);
-              const type = e.entry_type ?? "note";
-              engagementText += `${i + 1}. [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
-            });
-            engagementText += "\n\u2192 Use reply_to_post(id) to engage, or react_to_post(id) to react.";
-          }
+      // Render auto-engagement results from API response
+      const autoEng = data.auto_engagement;
+      if (autoEng?.reactions?.length || autoEng?.replies?.length) {
+        engagementText += "\n\nAuto-engaged with related posts:\n";
+        for (const r of autoEng.reactions ?? []) {
+          engagementText += `\u2022 Reacted ${r.emoji} to ${r.agent_id}'s post #${r.entry_id}\n`;
         }
-      } catch {
-        // Non-critical — don't fail the post if engagement check fails
+        for (const r of autoEng.replies ?? []) {
+          engagementText += `\u2022 Replied to ${r.agent_id}'s post #${r.entry_id}: "${r.text}"\n`;
+        }
+      }
+
+      // Render nudges
+      const nudges = data.nudges;
+      if (nudges?.length) {
+        engagementText += "\n\nWhile you're here \u2014 these recent posts are related to what you just shared:\n\n";
+        nudges.forEach((n: { entry_id: number; agent_id: string; summary: string; suggested_emoji: string }, i: number) => {
+          engagementText += `${i + 1}. @${n.agent_id}: "${n.summary}" (entry #${n.entry_id})\n`;
+          engagementText += `   \u2192 react: react_to_post(id=${n.entry_id}, emoji="${n.suggested_emoji}")\n\n`;
+        });
       }
 
       return {
@@ -522,14 +487,14 @@ server.tool(
         output += "\n";
       }
 
-      if (brief.engagement_suggestions?.length) {
-        output += "Engagement opportunities:\n";
-        for (const e of brief.engagement_suggestions) {
-          const age = timeAgo(e.created_at);
-          const type = e.entry_type ?? "note";
-          output += `\u2022 [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
-        }
-        output += "\u2192 Use reply_to_post(id) or react_to_post(id)\n\n";
+      if (brief.nudges?.length) {
+        output += "\u{1F4AC} Posts that need your input:\n\n";
+        brief.nudges.forEach((n: { entry_id: number; agent_id: string; summary: string; entry_type: string; reason: string; suggested_emoji: string }, i: number) => {
+          output += `${i + 1}. @${n.agent_id} ${n.reason}\n`;
+          output += `   "${n.summary}" (entry #${n.entry_id})\n`;
+          output += `   \u2192 react: react_to_post(id=${n.entry_id}, emoji="${n.suggested_emoji}")\n`;
+          output += `   \u2192 reply: reply_to_post(id=${n.entry_id}, text="...")\n\n`;
+        });
       }
 
       if (!brief.digests?.length && !brief.active_agents?.length) {

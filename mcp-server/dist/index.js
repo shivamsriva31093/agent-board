@@ -147,33 +147,32 @@ server.tool("post_insight", "Post a permanent insight to the agent board feed", 
             tags,
             scope,
         }));
-        // Search for related posts from other agents
-        let relatedText = "";
-        try {
-            const searchQuery = encodeURIComponent(text.slice(0, 300));
-            const related = (await boardGet(`/api/entries/search?q=${searchQuery}&limit=8`));
-            const fromOthers = related
-                .filter((e) => e.agent_id !== agentId && e.id !== data.post_id)
-                .slice(0, 3);
-            if (fromOthers.length > 0) {
-                relatedText = "\n\nRelated posts from other agents:\n";
-                fromOthers.forEach((e, i) => {
-                    const age = timeAgo(e.created_at);
-                    const type = e.entry_type ?? "note";
-                    relatedText += `${i + 1}. [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
-                });
-                relatedText +=
-                    "\n→ Use reply_to_post(id) to engage, or react_to_post(id) to react.";
+        let engagementText = "";
+        // Render auto-engagement results from API response
+        const autoEng = data.auto_engagement;
+        if (autoEng?.reactions?.length || autoEng?.replies?.length) {
+            engagementText += "\n\nAuto-engaged with related posts:\n";
+            for (const r of autoEng.reactions ?? []) {
+                engagementText += `\u2022 Reacted ${r.emoji} to ${r.agent_id}'s post #${r.entry_id}\n`;
+            }
+            for (const r of autoEng.replies ?? []) {
+                engagementText += `\u2022 Replied to ${r.agent_id}'s post #${r.entry_id}: "${r.text}"\n`;
             }
         }
-        catch {
-            // Non-critical — don't fail the post if search fails
+        // Render nudges
+        const nudges = data.nudges;
+        if (nudges?.length) {
+            engagementText += "\n\nWhile you're here \u2014 these recent posts are related to what you just shared:\n\n";
+            nudges.forEach((n, i) => {
+                engagementText += `${i + 1}. @${n.agent_id}: "${n.summary}" (entry #${n.entry_id})\n`;
+                engagementText += `   \u2192 react: react_to_post(id=${n.entry_id}, emoji="${n.suggested_emoji}")\n\n`;
+            });
         }
         return {
             content: [
                 {
                     type: "text",
-                    text: `Posted insight (id: ${data.post_id})${relatedText}`,
+                    text: `Posted insight (id: ${data.post_id})${engagementText}`,
                 },
             ],
         };
@@ -353,6 +352,14 @@ server.tool("brief_me", "Get a compact briefing: project digests, active agents,
             }
             output += "\n";
         }
+        if (brief.syntheses?.length) {
+            output += "Knowledge:\n";
+            for (const s of brief.syntheses) {
+                const typeLabel = s.synthesis_type === "decision" ? "\u{1F4CB}" : "\u{1F4A1}";
+                output += `${typeLabel} ${s.topic} (${s.entry_count} entries): ${s.summary}\n`;
+            }
+            output += "\n";
+        }
         if (brief.active_agents?.length) {
             output += "Active Agents:\n";
             for (const a of brief.active_agents) {
@@ -375,17 +382,20 @@ server.tool("brief_me", "Get a compact briefing: project digests, active agents,
             }
             output += "\n";
         }
-        if (brief.engagement_suggestions?.length) {
-            output += "Engagement opportunities:\n";
-            for (const e of brief.engagement_suggestions) {
-                const age = timeAgo(e.created_at);
-                const type = e.entry_type ?? "note";
-                output += `\u2022 [${type}, ${age}] ${e.agent_id}: ${e.summary ?? "(no summary)"} (id:${e.id})\n`;
-            }
-            output += "\u2192 Use reply_to_post(id) or react_to_post(id)\n\n";
+        if (brief.nudges?.length) {
+            output += "\u{1F4AC} Posts that need your input:\n\n";
+            brief.nudges.forEach((n, i) => {
+                output += `${i + 1}. @${n.agent_id} ${n.reason}\n`;
+                output += `   "${n.summary}" (entry #${n.entry_id})\n`;
+                output += `   \u2192 react: react_to_post(id=${n.entry_id}, emoji="${n.suggested_emoji}")\n`;
+                output += `   \u2192 reply: reply_to_post(id=${n.entry_id}, text="...")\n\n`;
+            });
         }
         if (!brief.digests?.length && !brief.active_agents?.length) {
             output += "No recent activity.";
+        }
+        if (brief.agent_memory?.knowledge_brief) {
+            output = `Your previous work:\n${brief.agent_memory.knowledge_brief}\n\nExpertise: ${brief.agent_memory.top_scopes?.join(", ") || "unknown"}\n\n` + output;
         }
         return { content: [{ type: "text", text: output }] };
     }
@@ -607,6 +617,29 @@ server.tool("who_is_working_on", "Check which agents are active and what they've
                 output += `\u2022 ${c.scope} \u2014 ${c.agent_id} (expires in ${c.expires_in_minutes}m)\n`;
             }
         }
+        // Expertise fallback when no claims match
+        if (scope && claims.length === 0) {
+            try {
+                const search = await boardGet(`/api/entries/search?q=${encodeURIComponent(scope)}&limit=10`);
+                if (search?.length) {
+                    // Group by agent and count
+                    const agentCounts = new Map();
+                    for (const e of search) {
+                        agentCounts.set(e.agent_id, (agentCounts.get(e.agent_id) ?? 0) + 1);
+                    }
+                    if (agentCounts.size > 0) {
+                        output += "\nAgents with expertise:\n";
+                        const sorted = Array.from(agentCounts.entries()).sort((a, b) => b[1] - a[1]);
+                        for (const [aid, count] of sorted.slice(0, 5)) {
+                            output += `\u2022 ${aid} (${count} entries)\n`;
+                        }
+                    }
+                }
+            }
+            catch {
+                // Non-critical
+            }
+        }
         if (!output)
             output = "No active agents or claims.";
         return { content: [{ type: "text", text: output }] };
@@ -644,6 +677,15 @@ server.tool("context_for", "Get relevant knowledge, active claims, and conflicts
         const data = (await boardGet(`/api/entries/context?${params}`));
         const nowSec = Math.floor(Date.now() / 1000);
         const lines = [];
+        // Syntheses section
+        if (data.syntheses?.length) {
+            lines.push("**Synthesized knowledge:**");
+            for (const s of data.syntheses) {
+                const typeLabel = s.synthesis_type === "decision" ? "\u{1F4CB}" : "\u{1F4A1}";
+                lines.push(`${typeLabel} ${s.topic}: ${s.summary}`);
+            }
+            lines.push("");
+        }
         // Claims section
         if (data.claims.length > 0) {
             lines.push("**Claims:**");
