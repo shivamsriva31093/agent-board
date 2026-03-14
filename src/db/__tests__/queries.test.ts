@@ -1145,6 +1145,81 @@ describe("agent_memory", () => {
   });
 });
 
+// ── Nudges ────────────────────────────────────────────────────────────
+
+describe("nudges", () => {
+  it("insertNudge and getNudgedEntryIds", () => {
+    q.upsertAgent({ id: "proj/a1", project: "proj", agent_type: null, avatar_seed: "a1" });
+    const now = Math.floor(Date.now() / 1000);
+    const e1 = q.insertEntry({
+      agent_id: "proj/a1", text: "Test", summary: "Test", entry_type: "bugfix",
+      scope: null, mood: null, code_block: null, screenshot: null, tags: null, created_at: now,
+    });
+
+    q.insertNudge({ agent_id: "proj/a1", entry_id: e1.id, reason: "similar bug", created_at: now });
+
+    const nudgedIds = q.getNudgedEntryIds("proj/a1");
+    expect(nudgedIds).toContain(e1.id);
+    expect(nudgedIds.length).toBe(1);
+  });
+
+  it("insertNudge ignores duplicates", () => {
+    q.upsertAgent({ id: "proj/a1", project: "proj", agent_type: null, avatar_seed: "a1" });
+    const now = Math.floor(Date.now() / 1000);
+    const e1 = q.insertEntry({
+      agent_id: "proj/a1", text: "Test", summary: "Test", entry_type: "bugfix",
+      scope: null, mood: null, code_block: null, screenshot: null, tags: null, created_at: now,
+    });
+
+    q.insertNudge({ agent_id: "proj/a1", entry_id: e1.id, reason: "reason1", created_at: now });
+    q.insertNudge({ agent_id: "proj/a1", entry_id: e1.id, reason: "reason2", created_at: now }); // duplicate — ignored
+
+    const nudgedIds = q.getNudgedEntryIds("proj/a1");
+    expect(nudgedIds.length).toBe(1);
+  });
+
+  it("getEngagedEntryIds returns reacted and replied entries", () => {
+    q.upsertAgent({ id: "proj/a1", project: "proj", agent_type: null, avatar_seed: "a1" });
+    q.upsertAgent({ id: "proj/a2", project: "proj", agent_type: null, avatar_seed: "a2" });
+    const now = Math.floor(Date.now() / 1000);
+
+    const e1 = q.insertEntry({
+      agent_id: "proj/a2", text: "Post 1", summary: "Post 1", entry_type: "bugfix",
+      scope: null, mood: null, code_block: null, screenshot: null, tags: null, created_at: now,
+    });
+    const e2 = q.insertEntry({
+      agent_id: "proj/a2", text: "Post 2", summary: "Post 2", entry_type: "shipped",
+      scope: null, mood: null, code_block: null, screenshot: null, tags: null, created_at: now,
+    });
+
+    // a1 reacts to e1
+    q.insertReaction({ post_id: e1.id, agent_id: "proj/a1", emoji: "\uD83D\uDC40" });
+    // a1 replies to e2
+    q.insertReply({ post_id: e2.id, agent_id: "proj/a1", text: "Nice!", created_at: now });
+
+    const engaged = q.getEngagedEntryIds("proj/a1");
+    expect(engaged).toContain(e1.id);
+    expect(engaged).toContain(e2.id);
+    expect(engaged.length).toBe(2);
+  });
+
+  it("markNudgeEngaged updates engaged_at", () => {
+    q.upsertAgent({ id: "proj/a1", project: "proj", agent_type: null, avatar_seed: "a1" });
+    const now = Math.floor(Date.now() / 1000);
+    const e1 = q.insertEntry({
+      agent_id: "proj/a1", text: "Test", summary: "Test", entry_type: "bugfix",
+      scope: null, mood: null, code_block: null, screenshot: null, tags: null, created_at: now,
+    });
+
+    q.insertNudge({ agent_id: "proj/a1", entry_id: e1.id, reason: "test", created_at: now });
+    q.markNudgeEngaged("proj/a1", e1.id, now + 100);
+
+    // Verify by re-querying — engaged nudges should still appear in getNudgedEntryIds
+    const nudged = q.getNudgedEntryIds("proj/a1");
+    expect(nudged).toContain(e1.id);
+  });
+});
+
 // ── Analytics ─────────────────────────────────────────────────────────
 
 describe("analytics", () => {

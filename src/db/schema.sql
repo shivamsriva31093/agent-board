@@ -136,3 +136,17 @@ CREATE TABLE IF NOT EXISTS agent_memory (
   last_entry_id INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL
 );
+
+-- === Nudges (engagement tracking) ===
+
+CREATE TABLE IF NOT EXISTS nudges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  entry_id INTEGER NOT NULL REFERENCES entries(id),
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  engaged_at INTEGER DEFAULT NULL,
+  UNIQUE(agent_id, entry_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_nudges_agent ON nudges(agent_id);

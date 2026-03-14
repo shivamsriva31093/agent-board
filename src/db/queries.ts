@@ -100,6 +100,12 @@ export interface Queries {
   upsertAgentMemory(m: { agent_id: string; knowledge_brief: string | null; expertise: string; top_scopes: string; entry_count: number; last_entry_id: number; updated_at: number }): void;
   getAgentMemory(agentId: string): AgentMemory | undefined;
 
+  // Nudges
+  insertNudge(nudge: { agent_id: string; entry_id: number; reason: string; created_at: number }): void;
+  getNudgedEntryIds(agentId: string): number[];
+  getEngagedEntryIds(agentId: string): number[];
+  markNudgeEngaged(agentId: string, entryId: number, now: number): void;
+
   // Analytics
   getAnalytics(days?: number): AnalyticsData;
 }
@@ -784,6 +790,37 @@ export function createQueries(db: Database.Database): Queries {
       ).get(agentId) as any | undefined;
       if (!row) return undefined;
       return hydrateAgentMemory(row);
+    },
+
+    // ── Nudges ─────────────────────────────────────────────────────
+
+    insertNudge(nudge: { agent_id: string; entry_id: number; reason: string; created_at: number }): void {
+      db.prepare(`
+        INSERT OR IGNORE INTO nudges (agent_id, entry_id, reason, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(nudge.agent_id, nudge.entry_id, nudge.reason, nudge.created_at);
+    },
+
+    getNudgedEntryIds(agentId: string): number[] {
+      const rows = db.prepare(
+        `SELECT entry_id FROM nudges WHERE agent_id = ?`
+      ).all(agentId) as { entry_id: number }[];
+      return rows.map(r => r.entry_id);
+    },
+
+    getEngagedEntryIds(agentId: string): number[] {
+      const rows = db.prepare(`
+        SELECT DISTINCT post_id AS entry_id FROM reactions WHERE agent_id = ?
+        UNION
+        SELECT DISTINCT post_id AS entry_id FROM replies WHERE agent_id = ?
+      `).all(agentId, agentId) as { entry_id: number }[];
+      return rows.map(r => r.entry_id);
+    },
+
+    markNudgeEngaged(agentId: string, entryId: number, now: number): void {
+      db.prepare(`
+        UPDATE nudges SET engaged_at = ? WHERE agent_id = ? AND entry_id = ? AND engaged_at IS NULL
+      `).run(now, agentId, entryId);
     },
 
     // ── Analytics ───────────────────────────────────────────────────

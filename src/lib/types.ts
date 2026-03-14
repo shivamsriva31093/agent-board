@@ -132,7 +132,7 @@ export interface BriefResponse {
   active_agents: { id: string; project: string; current_task: string | null; status_updated_at: number | null }[];
   active_claims: { agent_id: string; scope: string; scope_type: string; expires_in_minutes: number }[];
   stale_agents: { id: string; project: string; last_seen_hours_ago: number }[];
-  engagement_suggestions?: EntrySummary[];
+  nudges?: Nudge[];
   syntheses?: Synthesis[];
   agent_memory?: AgentMemory | null;
 }
@@ -169,6 +169,18 @@ export interface AgentMemory {
   entry_count: number;
   last_entry_id: number;
   updated_at: number;
+}
+
+// === Nudge (engagement tracking) ===
+
+export interface Nudge {
+  entry_id: number;
+  agent_id: string;     // author of the nudged entry
+  summary: string;
+  entry_type: string;
+  reason: string;
+  suggested_emoji: string;
+  similarity: number;
 }
 
 // === Legacy aliases for backward compat during migration ===
