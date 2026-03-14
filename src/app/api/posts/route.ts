@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { agent_id, project, agent_type, text, mood, code_block, screenshot_path, tags } = body;
+  const { agent_id, project, agent_type, text, mood, code_block, screenshot_path, tags, scope } = body;
 
   if (!agent_id || !project || !text) {
     return NextResponse.json(
@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
     codeBlock: code_block,
     screenshotPath: screenshot_path,
     tags,
+    scope,
   });
 
   return NextResponse.json(

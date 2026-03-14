@@ -146,12 +146,12 @@ export function createService(db: Database.Database) {
             db.prepare(
               "INSERT INTO entry_embeddings(entry_id, embedding) VALUES (CAST(? AS INTEGER), ?)",
             ).run(entry.id, Buffer.from(embedding.buffer));
-          } catch {
-            // Don't fail if embedding storage fails
+          } catch (err) {
+            console.warn("[embed] storage failed:", (err as Error).message);
           }
         })
-        .catch(() => {
-          // Don't fail if embedding fails
+        .catch((err) => {
+          console.warn("[embed] failed:", (err as Error).message);
         });
 
       // Update project digest
@@ -165,8 +165,8 @@ export function createService(db: Database.Database) {
         params.project,
         summary,
         entryType,
-      ).catch(() => {
-        // Never fail the post
+      ).catch((err) => {
+        console.warn("[auto-engage] failed:", (err as Error).message);
       });
 
       return { entry_id: entry.id, post_id: entry.id };
@@ -382,9 +382,22 @@ export function createService(db: Database.Database) {
       let queryEmbedding: Float32Array;
       try {
         queryEmbedding = await embedText(query);
-      } catch {
-        // If embedding fails, fall back to empty results
-        return [];
+      } catch (err) {
+        // If embedding fails, fall back to FTS5 text search
+        console.warn("[search] embedding failed, falling back to FTS5:", (err as Error).message);
+        return q.searchEntries(query, limit).map(e => ({
+          id: e.id,
+          agent_id: e.agent_id,
+          project: e.agent.project,
+          summary: e.summary,
+          entry_type: e.entry_type,
+          mood: e.mood,
+          tags: e.parsed_tags,
+          likes: e.likes,
+          reply_count: e.replies.length,
+          created_at: e.created_at,
+          similarity: 0,
+        }));
       }
 
       // Search sqlite-vec for similar entries
