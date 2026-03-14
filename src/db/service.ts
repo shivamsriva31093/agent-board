@@ -14,6 +14,7 @@ import type {
   AutoEngagement,
   Synthesis,
   AgentMemory,
+  Nudge,
 } from "@/lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -96,6 +97,18 @@ function updateProjectDigest(
     updated_at: now(),
   });
 }
+
+const EMOJI_MAP: Record<string, string> = {
+  bugfix: "\u{1F527}",
+  discovery: "\u{1F440}",
+  decision: "\u{1F914}",
+  pattern: "\u{1F4A1}",
+  warning: "\u26A0\uFE0F",
+  shipped: "\u{1F680}",
+  struggle: "\u{1F4AA}",
+  question: "\u2753",
+};
+const DEFAULT_EMOJI = "\u{1F517}";
 
 // ── Service factory ────────────────────────────────────────────────
 
@@ -192,18 +205,6 @@ export function createService(db: Database.Database) {
       const REPLY_THRESHOLD = 0.4;
       const MAX_REACTIONS = 2;
       const MAX_REPLIES = 2;
-
-      const EMOJI_MAP: Record<string, string> = {
-        bugfix: "\u{1F527}",
-        discovery: "\u{1F440}",
-        decision: "\u{1F914}",
-        pattern: "\u{1F4A1}",
-        warning: "\u26A0\uFE0F",
-        shipped: "\u{1F680}",
-        struggle: "\u{1F4AA}",
-        question: "\u2753",
-      };
-      const DEFAULT_EMOJI = "\u{1F517}";
 
       const REPLY_TEMPLATES: Record<string, string> = {
         "bugfix:bugfix": "hit a similar bug in {project} \u2014 {summary}",
@@ -635,28 +636,104 @@ export function createService(db: Database.Database) {
       return { entries: result, claims, conflicts, truncated, syntheses: relevantSyntheses };
     },
 
-    // ── engagementSuggestions ─────────────────────────────────────
+    // ── selectNudges (replaces engagementSuggestions) ─────────────────
 
-    async engagementSuggestions(
+    async selectNudges(
       agentId: string,
       limit: number = 3,
-    ): Promise<EntrySummary[]> {
-      // 1. Get agent's recent entries
-      const myEntries = q.getEntriesByAgent(agentId, 5);
-      if (myEntries.length === 0) return [];
+      contextOverride?: string,
+    ): Promise<Nudge[]> {
+      // 1. Get context
+      let context: string;
+      let agentEntryTypes: Set<string>;
+      let agentTags: Set<string>;
 
-      // 2. Combine summaries into search query
-      const queryText = myEntries
-        .map((e) => e.summary ?? "")
-        .filter(Boolean)
-        .join(" ");
-      if (!queryText.trim()) return [];
+      if (contextOverride) {
+        context = contextOverride.slice(0, 500);
+        agentEntryTypes = new Set();
+        agentTags = new Set();
+      } else {
+        const myEntries = q.getEntriesByAgent(agentId, 5);
+        if (myEntries.length === 0) return [];
 
-      // 3. Search for related entries (over-fetch for filtering headroom)
-      const related = await this.searchEntries(queryText, limit * 3);
+        context = myEntries
+          .map((e) => e.summary ?? "")
+          .filter(Boolean)
+          .join(" ")
+          .slice(0, 500);
+        if (!context.trim()) return [];
 
-      // 4. Filter to OTHER agents only
-      return related.filter((e) => e.agent_id !== agentId).slice(0, limit);
+        agentEntryTypes = new Set(myEntries.map(e => e.entry_type).filter(Boolean) as string[]);
+        agentTags = new Set(myEntries.flatMap(e => e.tags ?? []));
+      }
+
+      // 2. Semantic search
+      const related = await this.searchEntries(context, 20);
+
+      // 3. Get exclusion sets
+      const engagedIds = new Set(q.getEngagedEntryIds(agentId));
+      const nudgedIds = new Set(q.getNudgedEntryIds(agentId));
+      const sevenDaysAgo = now() - 7 * 86400;
+
+      // 4. Filter
+      const candidates = related.filter((e) =>
+        e.agent_id !== agentId &&
+        !engagedIds.has(e.id) &&
+        !nudgedIds.has(e.id) &&
+        e.created_at > sevenDaysAgo
+      );
+
+      // 5. Score
+      const scored = candidates.map((e) => {
+        const similarity = e.similarity ?? 0;
+        const ageSeconds = now() - e.created_at;
+        const recencyScore = Math.max(0, Math.min(1, 1 - ageSeconds / (7 * 86400)));
+        const deficitScore = 1 / (1 + e.likes);
+        const score = similarity * 0.4 + recencyScore * 0.3 + deficitScore * 0.3;
+        return { ...e, score };
+      });
+
+      // 6. Sort and take top N
+      scored.sort((a, b) => b.score - a.score);
+      const topN = scored.slice(0, limit);
+
+      // 7. Generate reason + build Nudge objects
+      const nudges: Nudge[] = topN.map((e) => {
+        let reason: string;
+        if (e.entry_type && agentEntryTypes.has(e.entry_type)) {
+          reason = `hit a similar ${e.entry_type} to yours`;
+        } else {
+          const entryTags: string[] = Array.isArray(e.tags) ? e.tags : [];
+          const overlap = entryTags.find(t => agentTags.has(t));
+          if (overlap) {
+            reason = `also working with ${overlap}`;
+          } else {
+            reason = "working on related stuff";
+          }
+        }
+
+        return {
+          entry_id: e.id,
+          agent_id: e.agent_id,
+          summary: e.summary ?? "(no summary)",
+          entry_type: e.entry_type ?? "note",
+          reason,
+          suggested_emoji: EMOJI_MAP[e.entry_type ?? ""] ?? DEFAULT_EMOJI,
+          similarity: e.similarity ?? 0,
+        };
+      });
+
+      // 8. Record nudges (skip if agent not yet registered — FK constraint)
+      const ts = now();
+      for (const n of nudges) {
+        try {
+          q.insertNudge({ agent_id: agentId, entry_id: n.entry_id, reason: n.reason, created_at: ts });
+        } catch {
+          // Agent may not be registered yet (e.g. contextOverride call before first post)
+        }
+      }
+
+      return nudges;
     },
 
     // ── getSyntheses ────────────────────────────────────────────────
@@ -802,6 +879,8 @@ export function createService(db: Database.Database) {
         text,
         created_at: now(),
       });
+      // Track nudge engagement
+      q.markNudgeEngaged(agentId, postId, now());
       return { reply_id: reply.id };
     },
 
@@ -820,6 +899,8 @@ export function createService(db: Database.Database) {
       if (reaction) {
         q.incrementLikes(postId);
       }
+      // Track nudge engagement
+      q.markNudgeEngaged(agentId, postId, now());
       return { ok: true };
     },
 
