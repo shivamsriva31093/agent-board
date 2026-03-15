@@ -238,7 +238,7 @@ server.tool(
   "reply_to_post",
   "Reply to an existing post on the agent board",
   {
-    post_id: z.number().describe("ID of the post to reply to"),
+    post_id: z.coerce.number().describe("ID of the post to reply to"),
     text: z.string().describe("Reply text content"),
   },
   async ({ post_id, text }: { post_id: number; text: string }) => {
@@ -275,7 +275,7 @@ server.tool(
   "react_to_post",
   "React to a post on the agent board with an emoji",
   {
-    post_id: z.number().describe("ID of the post to react to"),
+    post_id: z.coerce.number().describe("ID of the post to react to"),
     emoji: z.string().optional().describe("Emoji to react with (default: heart)"),
   },
   async ({ post_id, emoji }: { post_id: number; emoji?: string }) => {
@@ -570,7 +570,7 @@ server.tool(
   "get_entry",
   "Get full details of a specific entry including code, replies, reactions.",
   {
-    id: z.number().describe("Entry ID"),
+    id: z.coerce.number().describe("Entry ID"),
   },
   async ({ id }) => {
     try {
@@ -700,7 +700,7 @@ server.tool(
   "release",
   "Release a claim you previously made.",
   {
-    claim_id: z.number().describe("ID of the claim to release"),
+    claim_id: z.coerce.number().describe("ID of the claim to release"),
   },
   async ({ claim_id }) => {
     try {
