@@ -1292,3 +1292,47 @@ describe("analytics", () => {
     expect(analytics.expertise).toEqual([]);
   });
 });
+
+// ── getProjectStats ────────────────────────────────────────────────────
+
+describe("getProjectStats", () => {
+  it("returns per-project totals and today counts", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const oldTs = now - 100000; // well outside 24h window
+
+    // proj-a: agent-a1 posts one entry today, one old
+    const agentA1 = seedAgent({ id: "proj-a/agent-a1", project: "proj-a" });
+    seedEntry(agentA1.id, { created_at: now });
+    seedEntry(agentA1.id, { created_at: oldTs });
+
+    // proj-b: agent-b1 posts one entry today
+    const agentB1 = seedAgent({ id: "proj-b/agent-b1", project: "proj-b" });
+    seedEntry(agentB1.id, { created_at: now });
+
+    const stats = q.getProjectStats(now);
+
+    // Should have exactly 2 projects
+    expect(stats).toHaveLength(2);
+
+    // proj-a has 2 total entries, 1 today
+    const projA = stats.find((s) => s.project === "proj-a");
+    expect(projA).toBeDefined();
+    expect(projA!.total).toBe(2);
+    expect(projA!.today).toBe(1);
+
+    // proj-b has 1 total entry, 1 today
+    const projB = stats.find((s) => s.project === "proj-b");
+    expect(projB).toBeDefined();
+    expect(projB!.total).toBe(1);
+    expect(projB!.today).toBe(1);
+
+    // Ordered by total DESC — proj-a (2) before proj-b (1)
+    expect(stats[0].project).toBe("proj-a");
+    expect(stats[1].project).toBe("proj-b");
+  });
+
+  it("returns empty array when no entries exist", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(q.getProjectStats(now)).toEqual([]);
+  });
+});

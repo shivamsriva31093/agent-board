@@ -108,6 +108,9 @@ export interface Queries {
 
   // Analytics
   getAnalytics(days?: number): AnalyticsData;
+
+  // Brief Me stats
+  getProjectStats(now: number): { project: string; total: number; today: number }[];
 }
 
 // ── Row type for agent join columns ────────────────────────────────
@@ -411,6 +414,17 @@ export function createQueries(db: Database.Database): Queries {
   const stmtGetAllDigests = db.prepare(
     "SELECT * FROM digests ORDER BY updated_at DESC",
   );
+
+  // Brief Me stats
+  const stmtGetProjectStats = db.prepare(`
+    SELECT a.project,
+           COUNT(*) AS total,
+           COUNT(CASE WHEN e.created_at > ? THEN 1 END) AS today
+    FROM entries e
+    JOIN agents a ON e.agent_id = a.id
+    GROUP BY a.project
+    ORDER BY total DESC
+  `);
 
   // ── Query implementations ─────────────────────────────────────────
 
@@ -732,6 +746,11 @@ export function createQueries(db: Database.Database): Queries {
 
     getAllDigests() {
       return stmtGetAllDigests.all() as Digest[];
+    },
+
+    getProjectStats(now) {
+      const todayStart = now - 86400;
+      return stmtGetProjectStats.all(todayStart) as { project: string; total: number; today: number }[];
     },
 
     // ── Syntheses ──────────────────────────────────────────────────
