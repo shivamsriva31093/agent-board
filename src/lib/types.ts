@@ -128,13 +128,11 @@ export interface Digest {
 // === Brief (NEW — response shape for brief_me tool) ===
 
 export interface BriefResponse {
-  digests: { project: string; summary: string; entry_count: number }[];
-  active_agents: { id: string; project: string; current_task: string | null; status_updated_at: number | null }[];
-  active_claims: { agent_id: string; scope: string; scope_type: string; expires_in_minutes: number }[];
-  stale_agents: { id: string; project: string; last_seen_hours_ago: number }[];
-  nudges?: Nudge[];
-  syntheses?: Synthesis[];
-  agent_memory?: AgentMemory | null;
+  stats: { project: string; total: number; today: number }[];
+  active_agents: { id: string; current_task: string | null }[];
+  active_claims: { agent_id: string; scope: string; expires_in_minutes: number }[];
+  in_your_projects: { id: number; agent_id: string; summary: string; project: string; created_at: number; entry_type: string | null }[];
+  relevant_to_you: { id: number; agent_id: string; summary: string; project: string; created_at: number; entry_type: string | null; similarity: number }[];
 }
 
 // === AutoEngagement (response from auto-engage after posting) ===
