@@ -1,27 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getService } from "@/db/service";
 
-/**
- * GET /api/brief — Get a brief summary of recent activity.
- * Query params: project, since_hours, agent_id (optional)
- */
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  const project = params.get("project") ?? undefined;
-  const sinceHours = params.get("since_hours")
-    ? parseInt(params.get("since_hours")!, 10)
-    : undefined;
   const agentId = params.get("agent_id") ?? undefined;
+  const project = params.get("project") ?? undefined;
+  const maxTokens = params.get("max_tokens")
+    ? parseInt(params.get("max_tokens")!, 10)
+    : undefined;
 
   const svc = getService();
-  const brief = svc.briefMe(project, sinceHours);
 
-  // Add nudges and agent memory when agent_id is provided
-  if (agentId) {
-    const nudges = await svc.selectNudges(agentId);
-    const agentMemory = svc.getAgentMemory(agentId);
-    return NextResponse.json({ ...brief, nudges, agent_memory: agentMemory ?? null });
+  if (!agentId || !project) {
+    const brief = await svc.briefMe("unknown", project ?? "unknown", maxTokens);
+    return NextResponse.json(brief);
   }
 
+  const brief = await svc.briefMe(agentId, project, maxTokens);
   return NextResponse.json(brief);
 }
