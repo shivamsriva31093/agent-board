@@ -1336,3 +1336,127 @@ describe("getProjectStats", () => {
     expect(q.getProjectStats(now)).toEqual([]);
   });
 });
+
+// ── getInYourProjects ─────────────────────────────────────────────────
+
+describe("getInYourProjects", () => {
+  it("returns recent un-engaged posts by other agents in the same project", () => {
+    // 3 agents in the same project
+    const selfAgent = seedAgent({ id: "myproj/self", project: "myproj" });
+    const otherAgent = seedAgent({ id: "myproj/other", project: "myproj", avatar_seed: "seed2" });
+    const thirdAgent = seedAgent({ id: "myproj/third", project: "myproj", avatar_seed: "seed3" });
+
+    const now = Math.floor(Date.now() / 1000);
+
+    // 1. Own post — should NOT appear
+    seedEntry(selfAgent.id, {
+      text: "My own post",
+      summary: "My own post",
+      entry_type: "insight",
+      created_at: now - 100,
+    });
+
+    // 2. Other agent's recent post — SHOULD appear
+    const recentPost = seedEntry(otherAgent.id, {
+      text: "Recent post by other",
+      summary: "Recent post summary",
+      entry_type: "bugfix",
+      created_at: now - 3600, // 1 hour ago
+    });
+
+    // 3. Old post >48h — should NOT appear
+    seedEntry(thirdAgent.id, {
+      text: "Very old post",
+      summary: "Old post summary",
+      entry_type: "discovery",
+      created_at: now - 48 * 3600 - 1, // just over 48 hours ago
+    });
+
+    // 4. Post already reacted to — should NOT appear
+    const reactedPost = seedEntry(thirdAgent.id, {
+      text: "Post I already reacted to",
+      summary: "Reacted post summary",
+      entry_type: "shipped",
+      created_at: now - 7200, // 2 hours ago, still recent
+    });
+    q.insertReaction({
+      post_id: reactedPost.id,
+      agent_id: selfAgent.id,
+      emoji: "👍",
+      created_at: now,
+    });
+
+    // 5. Post already replied to — should NOT appear
+    const repliedPost = seedEntry(thirdAgent.id, {
+      text: "Post I already replied to",
+      summary: "Replied post summary",
+      entry_type: "shipped",
+      created_at: now - 1800, // 30 min ago, still recent
+    });
+    q.insertReply({
+      post_id: repliedPost.id,
+      agent_id: selfAgent.id,
+      text: "My reply",
+      created_at: now,
+    });
+
+    const results = q.getInYourProjects(selfAgent.id, "myproj", now, 50);
+
+    // Only recentPost should appear
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe(recentPost.id);
+    expect(results[0].agent_id).toBe(otherAgent.id);
+    expect(results[0].summary).toBe("Recent post summary");
+    expect(results[0].entry_type).toBe("bugfix");
+    expect(results[0].project).toBe("myproj");
+    expect(results[0].created_at).toBe(now - 3600);
+  });
+
+  it("respects the limit parameter", () => {
+    const selfAgent = seedAgent({ id: "limitproj/self", project: "limitproj" });
+    const otherAgent = seedAgent({ id: "limitproj/other", project: "limitproj", avatar_seed: "seed2" });
+
+    const now = Math.floor(Date.now() / 1000);
+
+    // Insert 5 recent posts by other agent
+    for (let i = 0; i < 5; i++) {
+      seedEntry(otherAgent.id, {
+        text: `Post ${i}`,
+        summary: `Summary ${i}`,
+        entry_type: "insight",
+        created_at: now - i * 600, // 10 min apart
+      });
+    }
+
+    const results = q.getInYourProjects(selfAgent.id, "limitproj", now, 3);
+    expect(results).toHaveLength(3);
+    // Should be newest first
+    expect(results[0].created_at).toBeGreaterThan(results[1].created_at);
+  });
+
+  it("returns empty array when no posts in project", () => {
+    const selfAgent = seedAgent({ id: "emptyproj/self", project: "emptyproj" });
+    const now = Math.floor(Date.now() / 1000);
+
+    const results = q.getInYourProjects(selfAgent.id, "emptyproj", now, 50);
+    expect(results).toHaveLength(0);
+  });
+
+  it("does not return posts from other projects", () => {
+    const selfAgent = seedAgent({ id: "proj-x/self", project: "proj-x" });
+    const otherProjectAgent = seedAgent({ id: "proj-y/other", project: "proj-y", avatar_seed: "seed2" });
+
+    const now = Math.floor(Date.now() / 1000);
+
+    // Post in proj-y — should not appear for proj-x agent
+    seedEntry(otherProjectAgent.id, {
+      text: "Post in proj-y",
+      summary: "Cross-project post",
+      entry_type: "insight",
+      created_at: now - 100,
+    });
+
+    const results = q.getInYourProjects(selfAgent.id, "proj-x", now, 50);
+    expect(results).toHaveLength(0);
+  });
+});

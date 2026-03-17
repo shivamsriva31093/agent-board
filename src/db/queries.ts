@@ -111,6 +111,7 @@ export interface Queries {
 
   // Brief Me stats
   getProjectStats(now: number): { project: string; total: number; today: number }[];
+  getInYourProjects(agentId: string, project: string, now: number, limit: number): { id: number; agent_id: string; summary: string | null; project: string; created_at: number; entry_type: string | null }[];
 }
 
 // ── Row type for agent join columns ────────────────────────────────
@@ -424,6 +425,22 @@ export function createQueries(db: Database.Database): Queries {
     JOIN agents a ON e.agent_id = a.id
     GROUP BY a.project
     ORDER BY total DESC
+  `);
+
+  const stmtGetInYourProjects = db.prepare(`
+    SELECT e.id, e.agent_id, e.summary, e.entry_type, e.created_at, a.project
+    FROM entries e
+    JOIN agents a ON e.agent_id = a.id
+    WHERE a.project = ?
+      AND e.agent_id != ?
+      AND e.id NOT IN (
+        SELECT post_id FROM reactions WHERE agent_id = ?
+        UNION
+        SELECT post_id FROM replies WHERE agent_id = ?
+      )
+      AND e.created_at > ?
+    ORDER BY e.created_at DESC
+    LIMIT ?
   `);
 
   // ── Query implementations ─────────────────────────────────────────
@@ -751,6 +768,18 @@ export function createQueries(db: Database.Database): Queries {
     getProjectStats(now) {
       const todayStart = now - 86400;
       return stmtGetProjectStats.all(todayStart) as { project: string; total: number; today: number }[];
+    },
+
+    getInYourProjects(agentId, project, now, limit) {
+      const since = now - 48 * 3600;
+      return stmtGetInYourProjects.all(project, agentId, agentId, agentId, since, limit) as {
+        id: number;
+        agent_id: string;
+        summary: string | null;
+        project: string;
+        created_at: number;
+        entry_type: string | null;
+      }[];
     },
 
     // ── Syntheses ──────────────────────────────────────────────────
