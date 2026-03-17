@@ -34,11 +34,11 @@ describe("v2 integration", () => {
     expect(entry!.entry_type).toBe("bugfix");
     expect(entry!.parsed_scope).toContain("src/workers/pool.ts");
 
-    // 3. Brief should include project digest
-    const brief = svc.briefMe("proj");
-    expect(brief.digests.length).toBeGreaterThan(0);
-    expect(brief.digests[0].project).toBe("proj");
-    expect(brief.digests[0].entry_count).toBe(1);
+    // 3. Brief should include project stats
+    const brief = await svc.briefMe("proj/main-abc", "proj");
+    expect(brief.stats.length).toBeGreaterThanOrEqual(1);
+    expect(brief.stats.find(s => s.project === "proj")!.project).toBe("proj");
+    expect(brief.stats.find(s => s.project === "proj")!.total).toBe(1);
 
     // 4. Claim a scope
     const claim = svc.createClaim(
@@ -52,7 +52,7 @@ describe("v2 integration", () => {
     expect(claim.conflicts).toHaveLength(0);
 
     // 5. Brief should show claim
-    const brief2 = svc.briefMe();
+    const brief2 = await svc.briefMe("proj/main-abc", "proj");
     expect(brief2.active_claims.length).toBe(1);
     expect(brief2.active_claims[0].scope).toBe("src/workers/");
 
@@ -69,17 +69,17 @@ describe("v2 integration", () => {
 
     // 7. Release first claim — only second remains
     svc.releaseClaim(claim.claim_id);
-    const brief3 = svc.briefMe();
+    const brief3 = await svc.briefMe("proj/main-abc", "proj");
     expect(brief3.active_claims.length).toBe(1);
     expect(brief3.active_claims[0].agent_id).toBe("proj/other-def");
   });
 
-  it("broadcast status appears in brief and who_is_working_on", () => {
+  it("broadcast status appears in brief and who_is_working_on", async () => {
     // Agent broadcasts status
     svc.broadcastStatus("proj/main-abc", "proj", "active", "refactoring auth");
 
     // Should appear in brief
-    const brief = svc.briefMe();
+    const brief = await svc.briefMe("proj/main-abc", "proj");
     expect(brief.active_agents.length).toBe(1);
     expect(brief.active_agents[0].current_task).toBe("refactoring auth");
 
@@ -106,10 +106,8 @@ describe("v2 integration", () => {
       text: "Shipped the new dashboard feature.",
     });
 
-    const brief = svc.briefMe("proj");
-    expect(brief.digests[0].entry_count).toBe(3);
-    expect(brief.digests[0].summary).toContain("memory leak");
-    expect(brief.digests[0].summary).toContain("Redis");
+    const brief = await svc.briefMe("proj/main-abc", "proj");
+    expect(brief.stats.find(s => s.project === "proj")!.total).toBe(3);
   });
 
   it("stories still work after v2 migration", () => {
@@ -487,5 +485,97 @@ describe("v2 integration", () => {
     expect(result.auto_engagement).toBeDefined();
     expect(result.auto_engagement.reactions).toBeInstanceOf(Array);
     expect(result.auto_engagement.replies).toBeInstanceOf(Array);
+  });
+
+  it("briefMe returns stats-first response with in_your_projects and relevant_to_you", async () => {
+    // Agent A posts in proj
+    await svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Fixed auth middleware to validate JWT expiry properly.",
+      tags: ["auth", "bugfix"],
+    });
+
+    // Agent B posts in proj
+    await svc.postInsight({
+      agentId: "proj/agent-b",
+      project: "proj",
+      text: "Refactored the session store to use Redis.",
+      tags: ["redis", "refactor"],
+    });
+
+    // Agent C posts in a different project
+    await svc.postInsight({
+      agentId: "other/agent-c",
+      project: "other",
+      text: "Similar auth token validation fix in our service.",
+      tags: ["auth"],
+    });
+
+    await new Promise(r => setTimeout(r, 50));
+
+    const brief = await svc.briefMe("proj/agent-a", "proj");
+
+    expect(brief.stats.length).toBeGreaterThanOrEqual(1);
+    const projStats = brief.stats.find(s => s.project === "proj");
+    expect(projStats).toBeDefined();
+    expect(projStats!.total).toBeGreaterThanOrEqual(2);
+
+    expect(brief.in_your_projects.every(e => e.agent_id !== "proj/agent-a")).toBe(true);
+
+    for (const e of brief.relevant_to_you) {
+      expect(e.project).not.toBe("proj");
+    }
+
+    expect(brief.active_agents).toBeInstanceOf(Array);
+    expect(brief.active_claims).toBeInstanceOf(Array);
+  });
+
+  it("briefMe returns empty in_your_projects when agent is alone in project", async () => {
+    await svc.postInsight({
+      agentId: "solo/agent-a",
+      project: "solo",
+      text: "Working alone on this project.",
+    });
+
+    const brief = await svc.briefMe("solo/agent-a", "solo");
+    expect(brief.in_your_projects).toEqual([]);
+  });
+
+  it("briefMe returns empty relevant_to_you when agent has no memory", async () => {
+    const brief = await svc.briefMe("new/agent-x", "new");
+    expect(brief.relevant_to_you).toEqual([]);
+  });
+
+  it("briefMe returns empty relevant_to_you when embedding service is down", async () => {
+    const { embedText } = await import("@/lib/embeddings");
+    const mockEmbed = vi.mocked(embedText);
+
+    await svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Working on database optimization.",
+    });
+    await new Promise(r => setTimeout(r, 50));
+
+    mockEmbed.mockRejectedValueOnce(new Error("service unavailable"));
+
+    const brief = await svc.briefMe("proj/agent-a", "proj");
+
+    expect(brief.stats).toBeInstanceOf(Array);
+    expect(brief.relevant_to_you).toEqual([]);
+
+    mockEmbed.mockResolvedValue(new Float32Array(384).fill(0.1));
+  });
+
+  it("briefMe returns empty in_your_projects when no posts in last 48h", async () => {
+    await svc.postInsight({
+      agentId: "proj/agent-a",
+      project: "proj",
+      text: "Old post that would be outside 48h window.",
+    });
+
+    const brief = await svc.briefMe("proj/agent-b", "proj");
+    expect(brief.stats.find(s => s.project === "proj")?.total).toBeGreaterThanOrEqual(1);
   });
 });

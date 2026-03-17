@@ -314,66 +314,90 @@ export function createService(db: Database.Database) {
 
     // ── briefMe ────────────────────────────────────────────────────
 
-    briefMe(project?: string, sinceHours?: number): BriefResponse {
+    async briefMe(
+      agentId: string,
+      currentProject: string,
+      maxTokens: number = 500,
+    ): Promise<BriefResponse> {
       const ts = now();
-      const sinceSeconds = (sinceHours ?? 24) * 3600;
-      const since = ts - sinceSeconds;
 
-      // Clean up expired claims while we're here
-      // (pragmatic -- no separate cron)
+      // 1. Stats — always included
+      const stats = q.getProjectStats(ts);
 
-      // 1. Get project digests
-      const digests = project
-        ? [q.getDigest(project, "project")].filter(
-            (d): d is NonNullable<typeof d> => d != null,
-          )
-        : q
-            .getAllDigests()
-            .filter((d) => d.scope_type === "project");
+      // 2. Active agents + claims — always included
+      const since = ts - 24 * 3600;
+      const activeAgents = q.getActiveAgents(since).map(a => ({
+        id: a.id,
+        current_task: a.current_task,
+      }));
 
-      // 2. Get active agents (active since `since`)
-      const activeAgents = q.getActiveAgents(since);
+      const activeClaims = q.getActiveClaims(ts).map(c => ({
+        agent_id: c.agent_id,
+        scope: c.scope,
+        expires_in_minutes: Math.max(0, Math.round((c.expires_at - ts) / 60)),
+      }));
 
-      // 3. Get active claims
-      const activeClaims = q.getActiveClaims(ts);
+      // 3. In your projects — SQL only, no embeddings
+      const inYourProjects = q.getInYourProjects(agentId, currentProject, ts, 4);
 
-      // 4. Get stale agents (active > 2 hours ago)
-      const staleAgents = q.getStaleAgents(ts, 7200);
+      // 4. Relevant to you — semantic search, with fallback
+      let relevantToYou: BriefResponse["relevant_to_you"] = [];
+      try {
+        const agentMemory = q.getAgentMemory(agentId);
+        if (agentMemory?.knowledge_brief) {
+          const results = await this.searchEntries(agentMemory.knowledge_brief.slice(0, 300), 10);
 
-      // 5. Get topic syntheses
-      const syntheses = project
-        ? q.getSynthesesByProject(project, 5)
-        : q.getAllSyntheses().slice(0, 5);
+          const engagedIds = new Set(q.getEngagedEntryIds(agentId));
+          const nudgedIds = new Set(q.getNudgedEntryIds(agentId));
+
+          relevantToYou = results
+            .filter(e =>
+              e.project !== currentProject &&
+              e.agent_id !== agentId &&
+              !engagedIds.has(e.id) &&
+              !nudgedIds.has(e.id)
+            )
+            .slice(0, 3)
+            .map(e => ({
+              id: e.id,
+              agent_id: e.agent_id,
+              summary: e.summary ?? "(no summary)",
+              project: e.project,
+              created_at: e.created_at,
+              entry_type: e.entry_type,
+              similarity: e.similarity ?? 0,
+            }));
+        }
+      } catch {
+        // Embedding service down — relevant_to_you stays empty
+      }
+
+      // 5. Token budget enforcement
+      const tokenBudget = maxTokens;
+      let remaining = tokenBudget;
+
+      remaining -= 150; // stats + active always fit
+
+      const maxProjectEntries = Math.min(inYourProjects.length, Math.max(0, Math.floor(remaining / 50)));
+      const truncatedProjectFeed = inYourProjects.slice(0, maxProjectEntries).map(e => ({
+        id: e.id,
+        agent_id: e.agent_id,
+        summary: e.summary ?? "(no summary)",
+        project: e.project,
+        created_at: e.created_at,
+        entry_type: e.entry_type,
+      }));
+      remaining -= maxProjectEntries * 50;
+
+      const maxRelevantEntries = Math.min(relevantToYou.length, Math.max(0, Math.floor(remaining / 50)));
+      const truncatedRelevant = relevantToYou.slice(0, maxRelevantEntries);
 
       return {
-        digests: digests.map((d) => ({
-          project: d.scope,
-          summary: d.summary,
-          entry_count: d.entry_count,
-        })),
-        active_agents: activeAgents.map((a) => ({
-          id: a.id,
-          project: a.project,
-          current_task: a.current_task,
-          status_updated_at: a.status_updated_at,
-        })),
-        active_claims: activeClaims.map((c) => ({
-          agent_id: c.agent_id,
-          scope: c.scope,
-          scope_type: c.scope_type,
-          expires_in_minutes: Math.max(
-            0,
-            Math.round((c.expires_at - ts) / 60),
-          ),
-        })),
-        stale_agents: staleAgents.map((a) => ({
-          id: a.id,
-          project: a.project,
-          last_seen_hours_ago: Math.round(
-            (ts - (a.status_updated_at ?? a.last_seen)) / 3600,
-          ),
-        })),
-        syntheses,
+        stats,
+        active_agents: activeAgents,
+        active_claims: activeClaims,
+        in_your_projects: truncatedProjectFeed,
+        relevant_to_you: truncatedRelevant,
       };
     },
 
