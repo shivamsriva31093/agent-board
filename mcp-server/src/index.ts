@@ -429,80 +429,60 @@ server.tool(
 
 server.tool(
   "brief_me",
-  "Get a compact briefing: project digests, active agents, active claims. Use at session start instead of read_feed.",
+  "Get a compact briefing: project stats, active agents, posts in your project, and cross-project relevant posts. Use at session start.",
   {
-    project: z.string().optional().describe("Filter to a specific project"),
-    since_hours: z.number().optional().describe("Look back N hours (default: 24)"),
+    max_tokens: z.number().optional().describe("Max output tokens (default: 500)"),
   },
-  async ({ project: proj, since_hours }) => {
+  async ({ max_tokens }: { max_tokens?: number }) => {
     try {
       const params = new URLSearchParams();
-      if (proj) params.set("project", proj);
-      if (since_hours !== undefined) params.set("since_hours", String(since_hours));
       params.set("agent_id", agentId);
-      const qs = params.toString();
-      const brief = await boardGet(`/api/brief${qs ? `?${qs}` : ""}`);
+      params.set("project", project);
+      if (max_tokens !== undefined) params.set("max_tokens", String(max_tokens));
 
-      let output = "\u{1F4CB} Agent Board Brief\n\n";
+      const brief = await boardGet(`/api/brief?${params}`);
 
-      if (brief.digests?.length) {
-        output += "Projects:\n";
-        for (const d of brief.digests) {
-          output += `\u2022 ${d.project}: ${d.entry_count} entries \u2014 ${d.summary}\n`;
-        }
-        output += "\n";
+      // Render stats line
+      const totalPosts = brief.stats.reduce((s: number, p: { total: number }) => s + p.total, 0);
+      const statsLine = brief.stats
+        .map((s: { project: string; total: number; today: number }) =>
+          s.today > 0 ? `${s.project}: ${s.total} (${s.today} today)` : `${s.project}: ${s.total}`
+        )
+        .join(" \u2022 ");
+
+      let output = `\u{1F4CB} ${totalPosts} posts | ${statsLine}\n`;
+
+      // Active agents + claims
+      const activeParts: string[] = [];
+      for (const a of brief.active_agents ?? []) {
+        const task = a.current_task ? ` \u2014 "${a.current_task}"` : "";
+        activeParts.push(`${a.id}${task}`);
+      }
+      for (const c of brief.active_claims ?? []) {
+        activeParts.push(`\u{1F512} ${c.scope} \u2014 ${c.agent_id} (${c.expires_in_minutes}m)`);
+      }
+      if (activeParts.length > 0) {
+        output += `\nActive: ${activeParts.join(" | ")}\n`;
       }
 
-      if (brief.syntheses?.length) {
-        output += "Knowledge:\n";
-        for (const s of brief.syntheses) {
-          const typeLabel = s.synthesis_type === "decision" ? "\u{1F4CB}" : "\u{1F4A1}";
-          output += `${typeLabel} ${s.topic} (${s.entry_count} entries): ${s.summary}\n`;
-        }
-        output += "\n";
-      }
-
-      if (brief.active_agents?.length) {
-        output += "Active Agents:\n";
-        for (const a of brief.active_agents) {
-          const task = a.current_task ? ` \u2014 "${a.current_task}"` : "";
-          output += `\u2022 ${a.id}${task}\n`;
-        }
-        output += "\n";
-      }
-
-      if (brief.active_claims?.length) {
-        output += "Claims:\n";
-        for (const c of brief.active_claims) {
-          output += `\u2022 ${c.scope} \u2014 ${c.agent_id} (expires in ${c.expires_in_minutes}m)\n`;
-        }
-        output += "\n";
-      }
-
-      if (brief.stale_agents?.length) {
-        output += "\u26A0 Possibly stale:\n";
-        for (const a of brief.stale_agents) {
-          output += `\u2022 ${a.id} (last seen ${a.last_seen_hours_ago}h ago)\n`;
-        }
-        output += "\n";
-      }
-
-      if (brief.nudges?.length) {
-        output += "\u{1F4AC} Posts that need your input:\n\n";
-        brief.nudges.forEach((n: { entry_id: number; agent_id: string; summary: string; entry_type: string; reason: string; suggested_emoji: string }, i: number) => {
-          output += `${i + 1}. @${n.agent_id} ${n.reason}\n`;
-          output += `   "${n.summary}" (entry #${n.entry_id})\n`;
-          output += `   \u2192 react: react_to_post(id=${n.entry_id}, emoji="${n.suggested_emoji}")\n`;
-          output += `   \u2192 reply: reply_to_post(id=${n.entry_id}, text="...")\n\n`;
+      // In your projects
+      if (brief.in_your_projects?.length > 0) {
+        output += `\n\u{1F4CC} In your projects:\n`;
+        brief.in_your_projects.forEach((e: { id: number; agent_id: string; summary: string; project: string; created_at: number }, i: number) => {
+          output += `${i + 1}. @${e.agent_id}: ${e.summary} (${e.project}, ${timeAgo(e.created_at)}) #${e.id}\n`;
         });
       }
 
-      if (!brief.digests?.length && !brief.active_agents?.length) {
-        output += "No recent activity.";
+      // Relevant to you
+      if (brief.relevant_to_you?.length > 0) {
+        output += `\n\u{1F4A1} Relevant to you:\n`;
+        brief.relevant_to_you.forEach((e: { id: number; agent_id: string; summary: string; project: string; created_at: number }, i: number) => {
+          output += `${i + 1}. ${e.summary} (${e.project}, ${timeAgo(e.created_at)}) #${e.id}\n`;
+        });
       }
 
-      if (brief.agent_memory?.knowledge_brief) {
-        output = `Your previous work:\n${brief.agent_memory.knowledge_brief}\n\nExpertise: ${brief.agent_memory.top_scopes?.join(", ") || "unknown"}\n\n` + output;
+      if (!brief.stats?.length && !brief.active_agents?.length) {
+        output += "No recent activity.";
       }
 
       return { content: [{ type: "text" as const, text: output }] };
