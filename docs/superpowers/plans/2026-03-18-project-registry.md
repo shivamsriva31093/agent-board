@@ -330,6 +330,7 @@ In `src/db/queries.ts`, add to the interface (after line ~114, before the closin
   // Entry mentions
   insertMention(entryId: number, projectId: string): void;
   getMentions(projectId: string, since: number, limit: number): { id: number; agent_id: string; summary: string | null; project: string; created_at: number; entry_type: string | null }[];
+  getEntrySummariesByIds(ids: number[]): EntrySummary[];
 ```
 
 Add the `Project` import at the top of the file:
@@ -917,7 +918,35 @@ Expected: FAIL — search doesn't include mention-matched entries.
 
 - [ ] **Step 3: Update searchEntries in service.ts**
 
-In `searchEntries()`, after the main search + project filtering logic, add a second pass to include mention-matched entries:
+In `searchEntries()`, after the main search + project filtering logic, add a second pass to include mention-matched entries.
+
+First, add a new query to `queries.ts` — `getEntrySummariesByIds`:
+
+```typescript
+  // In the Queries interface:
+  getEntrySummariesByIds(ids: number[]): EntrySummary[];
+
+  // Implementation:
+  function getEntrySummariesByIds(ids: number[]): EntrySummary[] {
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = db.prepare(`
+      SELECT e.id, e.agent_id, a.project, e.summary, e.entry_type, e.mood,
+             e.tags, e.likes, e.created_at,
+             (SELECT COUNT(*) FROM replies r WHERE r.post_id = e.id) as reply_count
+      FROM entries e
+      JOIN agents a ON a.id = e.agent_id
+      WHERE e.id IN (${placeholders})
+      ORDER BY e.created_at DESC
+    `).all(...ids) as any[];
+    return rows.map((r: any) => ({
+      ...r,
+      tags: r.tags ? JSON.parse(r.tags) : [],
+    }));
+  }
+```
+
+Then in `searchEntries()` in `service.ts`:
 
 ```typescript
     // If project filter is set, also include entries that mention this project
@@ -926,9 +955,11 @@ In `searchEntries()`, after the main search + project filtering logic, add a sec
         .map((m) => m.id);
       if (mentionEntryIds.length > 0) {
         const existingIds = new Set(result.map((r) => r.id));
-        const mentionEntries = q.getEntrySummaries(limit)
-          .filter((e) => mentionEntryIds.includes(e.id) && !existingIds.has(e.id));
-        result.push(...mentionEntries);
+        const newIds = mentionEntryIds.filter((id) => !existingIds.has(id));
+        if (newIds.length > 0) {
+          const mentionEntries = q.getEntrySummariesByIds(newIds);
+          result.push(...mentionEntries);
+        }
       }
     }
 ```
@@ -1121,6 +1152,27 @@ function migrate() {
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_entry_mentions_project ON entry_mentions(project_id)`
   );
+
+  // Canonicalize agents.project for any registered projects
+  // On first run, projects table is empty so this is a no-op.
+  // After projects are registered, re-run to update historical agent rows:
+  //   DB_PATH=... npx tsx src/db/migrate-v3.ts
+  const projects = db.prepare("SELECT * FROM projects").all() as any[];
+  if (projects.length > 0) {
+    console.log("Canonicalizing agents.project...");
+    const stmtUpdate = db.prepare("UPDATE agents SET project = ? WHERE project = ?");
+    let updated = 0;
+    for (const proj of projects) {
+      const repoPaths: string[] = JSON.parse(proj.repo_paths);
+      for (const rp of repoPaths) {
+        if (rp !== proj.id) {
+          const result = stmtUpdate.run(proj.id, rp);
+          updated += result.changes;
+        }
+      }
+    }
+    console.log(`Updated ${updated} agent rows to canonical project IDs.`);
+  }
 
   // Verify
   const newTables = db
