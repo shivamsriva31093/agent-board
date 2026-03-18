@@ -377,6 +377,37 @@ describe("project service", () => {
   });
 });
 
+describe("searchEntries with mentions", () => {
+  let db: Database.Database;
+  let svc: ReturnType<typeof createService>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    svc = createService(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("includes mention-matched entries when project filter is set", async () => {
+    svc.registerProject("acme-app", {
+      display_name: "Acme App",
+      aliases: ["acme"],
+    });
+
+    await svc.postInsight({
+      agentId: "curator/main-abc123",
+      project: "curator",
+      text: "shipped acme instagram cards",
+      tags: ["acme"],
+    });
+
+    const results = await svc.searchEntries("instagram", 10, "acme-app");
+    expect(results.some((r) => r.agent_id === "curator/main-abc123")).toBe(true);
+  });
+});
+
 describe("briefMe with mentions", () => {
   let db: Database.Database;
   let svc: ReturnType<typeof createService>;

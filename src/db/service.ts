@@ -481,13 +481,75 @@ export function createService(db: Database.Database) {
       limit: number = 5,
       project?: string,
     ): Promise<EntrySummary[]> {
-      let queryEmbedding: Float32Array;
+      let result: EntrySummary[];
+
+      let queryEmbedding: Float32Array | null = null;
       try {
         queryEmbedding = await embedText(query);
       } catch (err) {
-        // If embedding fails, fall back to FTS5 text search
         console.warn("[search] embedding failed, falling back to FTS5:", (err as Error).message);
-        return q.searchEntries(query, limit).map(e => ({
+      }
+
+      if (queryEmbedding) {
+        try {
+          // Search sqlite-vec for similar entries
+          const rows = db
+            .prepare(
+              `SELECT entry_id, distance
+               FROM entry_embeddings
+               WHERE embedding MATCH ? AND k = ?
+               ORDER BY distance`,
+            )
+            .all(Buffer.from(queryEmbedding.buffer), limit * 2) as {
+            entry_id: number;
+            distance: number;
+          }[];
+
+          // Fetch entry summaries and optionally filter by project
+          const summaries: EntrySummary[] = [];
+          for (const row of rows) {
+            if (summaries.length >= limit) break;
+
+            const entry = q.getEntry(row.entry_id);
+            if (!entry) continue;
+            if (project && entry.agent.project !== project) continue;
+
+            summaries.push({
+              id: entry.id,
+              agent_id: entry.agent_id,
+              project: entry.agent.project,
+              summary: entry.summary,
+              entry_type: entry.entry_type,
+              mood: entry.mood,
+              tags: entry.parsed_tags,
+              likes: entry.likes,
+              reply_count: entry.replies.length,
+              created_at: entry.created_at,
+              similarity: 1 - row.distance,
+            });
+          }
+
+          result = summaries;
+        } catch (err) {
+          // vec0 table missing (e.g. in tests) — fall back to FTS5
+          console.warn("[search] vec query failed, falling back to FTS5:", (err as Error).message);
+          result = q.searchEntries(query, limit).map(e => ({
+            id: e.id,
+            agent_id: e.agent_id,
+            project: e.agent.project,
+            summary: e.summary,
+            entry_type: e.entry_type,
+            mood: e.mood,
+            tags: e.parsed_tags,
+            likes: e.likes,
+            reply_count: e.replies.length,
+            created_at: e.created_at,
+            similarity: 0,
+          }));
+        }
+      } else {
+        // Embedding failed — use FTS5 text search
+        result = q.searchEntries(query, limit).map(e => ({
           id: e.id,
           agent_id: e.agent_id,
           project: e.agent.project,
@@ -502,44 +564,21 @@ export function createService(db: Database.Database) {
         }));
       }
 
-      // Search sqlite-vec for similar entries
-      const rows = db
-        .prepare(
-          `SELECT entry_id, distance
-           FROM entry_embeddings
-           WHERE embedding MATCH ? AND k = ?
-           ORDER BY distance`,
-        )
-        .all(Buffer.from(queryEmbedding.buffer), limit * 2) as {
-        entry_id: number;
-        distance: number;
-      }[];
-
-      // Fetch entry summaries and optionally filter by project
-      const summaries: EntrySummary[] = [];
-      for (const row of rows) {
-        if (summaries.length >= limit) break;
-
-        const entry = q.getEntry(row.entry_id);
-        if (!entry) continue;
-        if (project && entry.agent.project !== project) continue;
-
-        summaries.push({
-          id: entry.id,
-          agent_id: entry.agent_id,
-          project: entry.agent.project,
-          summary: entry.summary,
-          entry_type: entry.entry_type,
-          mood: entry.mood,
-          tags: entry.parsed_tags,
-          likes: entry.likes,
-          reply_count: entry.replies.length,
-          created_at: entry.created_at,
-          similarity: 1 - row.distance,
-        });
+      // If project filter is set, also include entries that mention this project
+      if (project) {
+        const mentionEntryIds = q.getMentions(project, 0, limit * 2)
+          .map((m) => m.id);
+        if (mentionEntryIds.length > 0) {
+          const existingIds = new Set(result.map((r) => r.id));
+          const newIds = mentionEntryIds.filter((id) => !existingIds.has(id));
+          if (newIds.length > 0) {
+            const mentionEntries = q.getEntrySummariesByIds(newIds);
+            result.push(...mentionEntries);
+          }
+        }
       }
 
-      return summaries;
+      return result;
     },
 
     // ── contextFor ─────────────────────────────────────────────────
