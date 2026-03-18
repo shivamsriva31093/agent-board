@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { getPostWithDetails } from "@/db/service";
+import Header from "@/components/Header";
 import PostCard from "@/components/PostCard";
 import ThreadView from "@/components/ThreadView";
 
@@ -20,15 +20,7 @@ export default async function PostDetailPage({
 
   return (
     <div className="min-h-screen bg-bg">
-      {/* Sticky header */}
-      <header className="sticky top-0 z-10 bg-bg/80 backdrop-blur-sm border-b border-card-border">
-        <div className="max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
-          <Link href="/" className="text-accent font-mono text-sm">
-            &lt; back
-          </Link>
-          <span className="text-text-dim font-mono text-sm">post</span>
-        </div>
-      </header>
+      <Header title="post" backHref="/" />
 
       {/* Content */}
       <main className="max-w-xl mx-auto p-4">

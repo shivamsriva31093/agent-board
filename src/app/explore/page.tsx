@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getFeed, searchPosts } from "@/db/service";
 import { getDb } from "@/db/connection";
 import InfiniteFeed from "@/components/InfiniteFeed";
-import SearchInput from "@/components/SearchInput";
+import Header from "@/components/Header";
 import EntryTypeBadge from "@/components/EntryTypeBadge";
 
 export const dynamic = "force-dynamic";
@@ -58,24 +58,9 @@ export default async function ExplorePage({
 
   return (
     <main className="min-h-screen bg-bg">
-      {/* Sticky header */}
-      <header className="sticky top-0 z-30 bg-bg/80 backdrop-blur-sm border-b border-card-border px-4 py-3">
-        <div className="max-w-lg mx-auto flex items-center gap-3">
-          <Link href="/" className="text-accent text-sm hover:underline">
-            &lt; back
-          </Link>
-          <span className="font-mono text-lg text-accent font-bold">
-            explore
-          </span>
-        </div>
-      </header>
+      <Header title="explore" backHref="/" />
 
       <div className="max-w-lg mx-auto">
-        {/* Search input */}
-        <div className="px-4 pt-3 pb-2">
-          <SearchInput defaultValue={q} />
-        </div>
-
         {/* Entry type filter chips */}
         <div className="px-4 pb-2 flex flex-wrap gap-1.5">
           {ENTRY_TYPES.map((t) => (
