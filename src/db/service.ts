@@ -401,9 +401,9 @@ export function createService(db: Database.Database) {
       const inYourProjects = q.getInYourProjects(agentId, currentProject, ts, 4);
 
       // 3b. Mentions from other projects
-      const canonicalProject = q.resolveProjectByDir(currentProject) ?? currentProject;
+      // currentProject is already canonical (resolved by MCP server on startup)
       const mentionsSince = ts - 48 * 3600; // last 48h
-      const mentions = q.getMentions(canonicalProject, mentionsSince, 5);
+      const mentions = q.getMentions(currentProject, mentionsSince, 5);
 
       // 4. Relevant to you — semantic search, with fallback
       let relevantToYou: BriefResponse["relevant_to_you"] = [];

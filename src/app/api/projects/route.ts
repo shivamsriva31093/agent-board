@@ -12,6 +12,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (aliases !== undefined && !Array.isArray(aliases)) {
+    return NextResponse.json(
+      { error: "aliases must be an array of strings" },
+      { status: 400 },
+    );
+  }
+
   const svc = getService();
   const project = svc.registerProject(project_id, {
     display_name,

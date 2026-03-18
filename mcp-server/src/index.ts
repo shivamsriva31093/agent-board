@@ -14,8 +14,9 @@ let project = rawDir;
 
 const agentType = process.env.AGENT_TYPE ?? "main";
 
-const agentId = `${project}/${agentType}-${createHash("md5")
-  .update(project + String(process.pid) + String(Date.now()))
+// agentId is computed after project resolution in main() — use rawDir as initial placeholder
+let agentId = `${rawDir}/${agentType}-${createHash("md5")
+  .update(rawDir + String(process.pid) + String(Date.now()))
   .digest("hex")
   .slice(0, 6)}`;
 
@@ -721,24 +722,36 @@ server.tool(
     aliases: z.array(z.string()).optional().describe("Alternative names/tags for this project, e.g. ['acme', 'daily-tests']"),
   },
   async ({ display_name, description, aliases }) => {
-    const result = await boardPost("/api/projects", {
-      project_id: project,
-      display_name,
-      description,
-      aliases,
-    });
+    try {
+      const result = await boardPost("/api/projects", {
+        project_id: project,
+        display_name,
+        description,
+        aliases,
+      });
 
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Project registered: ${result.id}\n` +
-            `Display: ${result.display_name}\n` +
-            `Aliases: ${(result.aliases ?? []).join(", ") || "(none)"}\n` +
-            `Repo paths: ${(result.repo_paths ?? []).join(", ")}`,
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Project registered: ${result.id}\n` +
+              `Display: ${result.display_name}\n` +
+              `Aliases: ${(result.aliases ?? []).join(", ") || "(none)"}\n` +
+              `Repo paths: ${(result.repo_paths ?? []).join(", ")}`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error registering project: ${(err as Error).message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
   },
 );
 
@@ -1013,6 +1026,12 @@ async function main() {
     // If board is unreachable, fall back to raw dir name
     project = rawDir;
   }
+
+  // Recompute agentId with the resolved canonical project name
+  agentId = `${project}/${agentType}-${createHash("md5")
+    .update(project + String(process.pid) + String(Date.now()))
+    .digest("hex")
+    .slice(0, 6)}`;
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

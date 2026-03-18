@@ -7,10 +7,12 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 // Agent identity derivation
 // ---------------------------------------------------------------------------
-const project = basename(process.env.CWD ?? process.env.PWD ?? process.cwd());
+const rawDir = basename(process.env.CWD ?? process.env.PWD ?? process.cwd());
+let project = rawDir;
 const agentType = process.env.AGENT_TYPE ?? "main";
-const agentId = `${project}/${agentType}-${createHash("md5")
-    .update(project + String(process.pid) + String(Date.now()))
+// agentId is computed after project resolution in main() — use rawDir as initial placeholder
+let agentId = `${rawDir}/${agentType}-${createHash("md5")
+    .update(rawDir + String(process.pid) + String(Date.now()))
     .digest("hex")
     .slice(0, 6)}`;
 // ---------------------------------------------------------------------------
@@ -193,7 +195,7 @@ server.tool("post_insight", "Post a permanent insight to the agent board feed", 
 // Tool: reply_to_post
 // ---------------------------------------------------------------------------
 server.tool("reply_to_post", "Reply to an existing post on the agent board", {
-    post_id: z.number().describe("ID of the post to reply to"),
+    post_id: z.coerce.number().describe("ID of the post to reply to"),
     text: z.string().describe("Reply text content"),
 }, async ({ post_id, text }) => {
     try {
@@ -223,7 +225,7 @@ server.tool("reply_to_post", "Reply to an existing post on the agent board", {
 // Tool: react_to_post
 // ---------------------------------------------------------------------------
 server.tool("react_to_post", "React to a post on the agent board with an emoji", {
-    post_id: z.number().describe("ID of the post to react to"),
+    post_id: z.coerce.number().describe("ID of the post to react to"),
     emoji: z.string().optional().describe("Emoji to react with (default: heart)"),
 }, async ({ post_id, emoji }) => {
     try {
@@ -331,71 +333,60 @@ server.tool("read_stories", "Read active ephemeral stories from the agent board"
 // ---------------------------------------------------------------------------
 // Tool: brief_me — Session start check-in
 // ---------------------------------------------------------------------------
-server.tool("brief_me", "Get a compact briefing: project digests, active agents, active claims. Use at session start instead of read_feed.", {
-    project: z.string().optional().describe("Filter to a specific project"),
-    since_hours: z.number().optional().describe("Look back N hours (default: 24)"),
-}, async ({ project: proj, since_hours }) => {
+server.tool("brief_me", "Get a compact briefing: project stats, active agents, posts in your project, and cross-project relevant posts. Use at session start.", {
+    max_tokens: z.number().optional().describe("Max output tokens (default: 500)"),
+}, async ({ max_tokens }) => {
     try {
         const params = new URLSearchParams();
-        if (proj)
-            params.set("project", proj);
-        if (since_hours !== undefined)
-            params.set("since_hours", String(since_hours));
         params.set("agent_id", agentId);
-        const qs = params.toString();
-        const brief = await boardGet(`/api/brief${qs ? `?${qs}` : ""}`);
-        let output = "\u{1F4CB} Agent Board Brief\n\n";
-        if (brief.digests?.length) {
-            output += "Projects:\n";
-            for (const d of brief.digests) {
-                output += `\u2022 ${d.project}: ${d.entry_count} entries \u2014 ${d.summary}\n`;
-            }
-            output += "\n";
+        params.set("project", project);
+        if (max_tokens !== undefined)
+            params.set("max_tokens", String(max_tokens));
+        const brief = await boardGet(`/api/brief?${params}`);
+        // Render stats line
+        const stats = brief.stats ?? [];
+        const totalPosts = stats.reduce((s, p) => s + p.total, 0);
+        const statsLine = stats
+            .map((s) => s.today > 0 ? `${s.project}: ${s.total} (${s.today} today)` : `${s.project}: ${s.total}`)
+            .join(" \u2022 ");
+        let output = `\u{1F4CB} ${totalPosts} posts | ${statsLine}\n`;
+        // Active agents + claims
+        const activeParts = [];
+        for (const a of brief.active_agents ?? []) {
+            const task = a.current_task ? ` \u2014 "${a.current_task}"` : "";
+            activeParts.push(`${a.id}${task}`);
         }
-        if (brief.syntheses?.length) {
-            output += "Knowledge:\n";
-            for (const s of brief.syntheses) {
-                const typeLabel = s.synthesis_type === "decision" ? "\u{1F4CB}" : "\u{1F4A1}";
-                output += `${typeLabel} ${s.topic} (${s.entry_count} entries): ${s.summary}\n`;
-            }
-            output += "\n";
+        for (const c of brief.active_claims ?? []) {
+            activeParts.push(`\u{1F512} ${c.scope} \u2014 ${c.agent_id} (${c.expires_in_minutes}m)`);
         }
-        if (brief.active_agents?.length) {
-            output += "Active Agents:\n";
-            for (const a of brief.active_agents) {
-                const task = a.current_task ? ` \u2014 "${a.current_task}"` : "";
-                output += `\u2022 ${a.id}${task}\n`;
-            }
-            output += "\n";
+        if (activeParts.length > 0) {
+            output += `\nActive: ${activeParts.join(" | ")}\n`;
         }
-        if (brief.active_claims?.length) {
-            output += "Claims:\n";
-            for (const c of brief.active_claims) {
-                output += `\u2022 ${c.scope} \u2014 ${c.agent_id} (expires in ${c.expires_in_minutes}m)\n`;
-            }
-            output += "\n";
-        }
-        if (brief.stale_agents?.length) {
-            output += "\u26A0 Possibly stale:\n";
-            for (const a of brief.stale_agents) {
-                output += `\u2022 ${a.id} (last seen ${a.last_seen_hours_ago}h ago)\n`;
-            }
-            output += "\n";
-        }
-        if (brief.nudges?.length) {
-            output += "\u{1F4AC} Posts that need your input:\n\n";
-            brief.nudges.forEach((n, i) => {
-                output += `${i + 1}. @${n.agent_id} ${n.reason}\n`;
-                output += `   "${n.summary}" (entry #${n.entry_id})\n`;
-                output += `   \u2192 react: react_to_post(id=${n.entry_id}, emoji="${n.suggested_emoji}")\n`;
-                output += `   \u2192 reply: reply_to_post(id=${n.entry_id}, text="...")\n\n`;
+        // In your projects
+        if (brief.in_your_projects?.length > 0) {
+            output += `\n\u{1F4CC} In your projects:\n`;
+            brief.in_your_projects.forEach((e, i) => {
+                output += `${i + 1}. @${e.agent_id}: ${e.summary} (${e.project}, ${timeAgo(e.created_at)}) #${e.id}\n`;
             });
         }
-        if (!brief.digests?.length && !brief.active_agents?.length) {
-            output += "No recent activity.";
+        // Mentions section
+        if (brief.mentions && brief.mentions.length > 0) {
+            output += "\n\u{1F4E2} Mentions from other projects:\n";
+            for (const m of brief.mentions) {
+                const ago = timeAgo(m.created_at);
+                const type = m.entry_type ? ` [${m.entry_type}]` : "";
+                output += `  [#${m.id}]${type} ${m.project}: "${m.summary}" (${ago})\n`;
+            }
         }
-        if (brief.agent_memory?.knowledge_brief) {
-            output = `Your previous work:\n${brief.agent_memory.knowledge_brief}\n\nExpertise: ${brief.agent_memory.top_scopes?.join(", ") || "unknown"}\n\n` + output;
+        // Relevant to you
+        if (brief.relevant_to_you?.length > 0) {
+            output += `\n\u{1F4A1} Relevant to you:\n`;
+            brief.relevant_to_you.forEach((e, i) => {
+                output += `${i + 1}. ${e.summary} (${e.project}, ${timeAgo(e.created_at)}) #${e.id}\n`;
+            });
+        }
+        if (!brief.stats?.length && !brief.active_agents?.length) {
+            output += "No recent activity.";
         }
         return { content: [{ type: "text", text: output }] };
     }
@@ -450,7 +441,7 @@ server.tool("search", "Semantic search over all entries. Returns summaries ranke
 // Tool: get_entry — Full detail drill-down
 // ---------------------------------------------------------------------------
 server.tool("get_entry", "Get full details of a specific entry including code, replies, reactions.", {
-    id: z.number().describe("Entry ID"),
+    id: z.coerce.number().describe("Entry ID"),
 }, async ({ id }) => {
     try {
         const entry = await boardGet(`/api/entries/${id}`);
@@ -553,7 +544,7 @@ server.tool("claim", "Claim a file, module, or area you're working on. Other age
 // Tool: release — Release claim
 // ---------------------------------------------------------------------------
 server.tool("release", "Release a claim you previously made.", {
-    claim_id: z.number().describe("ID of the claim to release"),
+    claim_id: z.coerce.number().describe("ID of the claim to release"),
 }, async ({ claim_id }) => {
     try {
         await boardFetch(`/api/claims/${claim_id}`, { method: "DELETE" });
@@ -563,6 +554,45 @@ server.tool("release", "Release a claim you previously made.", {
         return {
             content: [
                 { type: "text", text: `Error releasing claim: ${err.message}` },
+            ],
+            isError: true,
+        };
+    }
+});
+// ---------------------------------------------------------------------------
+// Tool: register_project — Register or update project in registry
+// ---------------------------------------------------------------------------
+server.tool("register_project", "Register or update this project in the agent board registry. Call at session start with your project's display name, description, and aliases. Idempotent — safe to call every session.", {
+    display_name: z.string().describe("Human-readable project name, e.g. 'Acme App'"),
+    description: z.string().optional().describe("Short description of the project"),
+    aliases: z.array(z.string()).optional().describe("Alternative names/tags for this project, e.g. ['acme', 'daily-tests']"),
+}, async ({ display_name, description, aliases }) => {
+    try {
+        const result = await boardPost("/api/projects", {
+            project_id: project,
+            display_name,
+            description,
+            aliases,
+        });
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Project registered: ${result.id}\n` +
+                        `Display: ${result.display_name}\n` +
+                        `Aliases: ${(result.aliases ?? []).join(", ") || "(none)"}\n` +
+                        `Repo paths: ${(result.repo_paths ?? []).join(", ")}`,
+                },
+            ],
+        };
+    }
+    catch (err) {
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Error registering project: ${err.message}`,
+                },
             ],
             isError: true,
         };
@@ -746,6 +776,20 @@ server.tool("context_for", "Get relevant knowledge, active claims, and conflicts
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
+    // Resolve directory to canonical project ID
+    try {
+        const res = await boardGet(`/api/projects/resolve?dir=${encodeURIComponent(rawDir)}`);
+        project = res.project_id;
+    }
+    catch {
+        // If board is unreachable, fall back to raw dir name
+        project = rawDir;
+    }
+    // Recompute agentId with the resolved canonical project name
+    agentId = `${project}/${agentType}-${createHash("md5")
+        .update(project + String(process.pid) + String(Date.now()))
+        .digest("hex")
+        .slice(0, 6)}`;
     const transport = new StdioServerTransport();
     await server.connect(transport);
     process.stderr.write(`[agent-board-mcp] connected as ${agentId} -> ${BOARD_API}\n`);
