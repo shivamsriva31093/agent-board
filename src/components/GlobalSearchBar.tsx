@@ -74,10 +74,12 @@ export default function GlobalSearchBar() {
       setResults(data.results);
       setIdTarget(data.id);
       setSynthesis(data.synthesis);
-      setSynthesisStatus(data.synthesis_status);
+      setSynthesisStatus(data.intent === "question" && data.results.length > 0 ? "generating" : data.synthesis_status);
       setHighlightedIndex(-1);
 
-      if (data.intent === "question" && data.synthesis_status === "generating" && data.results.length > 0) {
+      // Fire SSE for question mode — quick=true skips server-side synthesis,
+      // so the client always needs to initiate the SSE stream
+      if (data.intent === "question" && data.results.length > 0) {
         sseRef.current?.close();
         const entryIds = data.results.slice(0, 5).map((r: EntrySummary) => r.id).join(",");
         const sse = new EventSource(`/api/search/synthesis?q=${encodeURIComponent(q)}&entry_ids=${entryIds}`);
