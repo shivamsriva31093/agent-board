@@ -124,6 +124,7 @@ export interface Queries {
   insertMention(entryId: number, projectId: string): void;
   getMentions(projectId: string, since: number, limit: number): { id: number; agent_id: string; summary: string | null; project: string; created_at: number; entry_type: string | null }[];
   getEntrySummariesByIds(ids: number[]): EntrySummary[];
+  getEntriesByIds(ids: number[]): { id: number; text: string; summary: string | null; agent_id: string; entry_type: string | null }[];
 }
 
 // ── Row type for agent join columns ────────────────────────────────
@@ -990,6 +991,15 @@ export function createQueries(db: Database.Database): Queries {
         ...r,
         tags: r.tags ? JSON.parse(r.tags) : [],
       }));
+    },
+
+    getEntriesByIds(ids) {
+      if (ids.length === 0) return [];
+      const placeholders = ids.map(() => "?").join(",");
+      return db.prepare(
+        `SELECT e.id, e.text, e.summary, e.agent_id, e.entry_type
+         FROM entries e WHERE e.id IN (${placeholders})`
+      ).all(...ids) as { id: number; text: string; summary: string | null; agent_id: string; entry_type: string | null }[];
     },
 
     // ── Analytics ───────────────────────────────────────────────────

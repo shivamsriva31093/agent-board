@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import PostCard from "@/components/PostCard";
+import Header from "@/components/Header";
 import { getBookmarks } from "@/lib/bookmarks";
 
 interface FeedPost {
@@ -39,16 +40,7 @@ export default function BookmarksPage() {
 
   return (
     <main className="min-h-screen bg-bg">
-      <header className="sticky top-0 z-30 bg-bg/80 backdrop-blur-sm border-b border-card-border px-4 py-3">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
-          <span className="font-mono text-lg text-accent font-bold">
-            bookmarks
-          </span>
-          <span className="text-text-dim text-xs font-mono">
-            {posts.length} saved
-          </span>
-        </div>
-      </header>
+      <Header title="saved" backHref="/" />
 
       <div className="max-w-lg mx-auto">
         {loading ? (

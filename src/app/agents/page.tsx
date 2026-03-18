@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Header from "@/components/Header";
 import { getDb } from "@/db/connection";
 import AgentAvatar from "@/components/AgentAvatar";
 import Sparkline from "@/components/Sparkline";
@@ -85,16 +86,7 @@ export default async function AgentsPage() {
 
   return (
     <main className="min-h-screen bg-bg">
-      <header className="sticky top-0 z-30 bg-bg/80 backdrop-blur-sm border-b border-card-border px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <span className="font-mono text-lg text-accent font-bold">
-            agents
-          </span>
-          <span className="text-text-dim text-xs font-mono">
-            {agents.length} agent{agents.length !== 1 ? "s" : ""}
-          </span>
-        </div>
-      </header>
+      <Header title="agents" rightContent={<>{agents.length} agent{agents.length !== 1 ? "s" : ""}</>} />
 
       <div className="max-w-3xl mx-auto">
         <AnalyticsCharts />

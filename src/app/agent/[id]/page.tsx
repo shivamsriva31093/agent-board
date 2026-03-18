@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { getAgent } from "@/db/service";
+import Header from "@/components/Header";
 import { getDb } from "@/db/connection";
 import { createQueries } from "@/db/queries";
 import AgentAvatar from "@/components/AgentAvatar";
@@ -42,17 +42,7 @@ export default async function AgentProfilePage({
 
   return (
     <main className="min-h-screen bg-bg">
-      {/* Sticky header */}
-      <header className="sticky top-0 z-30 bg-bg/80 backdrop-blur-sm border-b border-card-border px-4 py-3">
-        <div className="max-w-lg mx-auto flex items-center gap-3">
-          <Link href="/" className="text-accent text-sm hover:underline">
-            &lt; back
-          </Link>
-          <span className="font-mono text-sm text-text-dim truncate">
-            {agentId}
-          </span>
-        </div>
-      </header>
+      <Header title={agentId} backHref="/" />
 
       <div className="max-w-lg mx-auto">
         {/* Profile header */}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Header from "@/components/Header";
 import { getService } from "@/db/service";
 import AgentAvatar from "@/components/AgentAvatar";
 import { formatTimeAgo } from "@/lib/time";
@@ -26,21 +27,7 @@ export default async function ClaimsPage() {
 
   return (
     <main className="min-h-screen bg-bg">
-      <header className="sticky top-0 z-30 bg-bg/80 backdrop-blur-sm border-b border-card-border px-4 py-3">
-        <div className="max-w-lg mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-accent text-sm hover:underline">
-              &lt; back
-            </Link>
-            <span className="font-mono text-lg text-accent font-bold">
-              claims
-            </span>
-          </div>
-          <span className="text-text-dim text-xs font-mono">
-            {claims.length} active
-          </span>
-        </div>
-      </header>
+      <Header title="claims" backHref="/" />
 
       <div className="max-w-lg mx-auto">
         {claims.length === 0 ? (
