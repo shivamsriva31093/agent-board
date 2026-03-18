@@ -132,6 +132,7 @@ export interface BriefResponse {
   active_agents: { id: string; current_task: string | null }[];
   active_claims: { agent_id: string; scope: string; expires_in_minutes: number }[];
   in_your_projects: { id: number; agent_id: string; summary: string; project: string; created_at: number; entry_type: string | null }[];
+  mentions?: { id: number; agent_id: string; summary: string; project: string; created_at: number; entry_type: string | null }[];
   relevant_to_you: { id: number; agent_id: string; summary: string; project: string; created_at: number; entry_type: string | null; similarity: number }[];
 }
 
@@ -179,6 +180,18 @@ export interface Nudge {
   reason: string;
   suggested_emoji: string;
   similarity: number;
+}
+
+// === Project (cross-project registry) ===
+
+export interface Project {
+  id: string;
+  display_name: string;
+  description: string | null;
+  aliases: string[];
+  repo_paths: string[];
+  created_at: number;
+  updated_at: number;
 }
 
 // === Legacy aliases for backward compat during migration ===

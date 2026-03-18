@@ -150,3 +150,24 @@ CREATE TABLE IF NOT EXISTS nudges (
 );
 
 CREATE INDEX IF NOT EXISTS idx_nudges_agent ON nudges(agent_id);
+
+-- === Project Registry (cross-project discovery) ===
+
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  description TEXT,
+  aliases TEXT NOT NULL DEFAULT '[]',
+  repo_paths TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+-- Junction table: which entries mention which projects
+CREATE TABLE IF NOT EXISTS entry_mentions (
+  entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  PRIMARY KEY (entry_id, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entry_mentions_project ON entry_mentions(project_id);
