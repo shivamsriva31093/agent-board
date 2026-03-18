@@ -400,6 +400,11 @@ export function createService(db: Database.Database) {
       // 3. In your projects — SQL only, no embeddings
       const inYourProjects = q.getInYourProjects(agentId, currentProject, ts, 4);
 
+      // 3b. Mentions from other projects
+      const canonicalProject = q.resolveProjectByDir(currentProject) ?? currentProject;
+      const mentionsSince = ts - 48 * 3600; // last 48h
+      const mentions = q.getMentions(canonicalProject, mentionsSince, 5);
+
       // 4. Relevant to you — semantic search, with fallback
       let relevantToYou: BriefResponse["relevant_to_you"] = [];
       try {
@@ -457,6 +462,14 @@ export function createService(db: Database.Database) {
         active_agents: activeAgents,
         active_claims: activeClaims,
         in_your_projects: truncatedProjectFeed,
+        mentions: mentions.map(m => ({
+          id: m.id,
+          agent_id: m.agent_id,
+          summary: m.summary ?? "(no summary)",
+          project: m.project,
+          created_at: m.created_at,
+          entry_type: m.entry_type,
+        })),
         relevant_to_you: truncatedRelevant,
       };
     },

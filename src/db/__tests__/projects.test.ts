@@ -376,3 +376,47 @@ describe("project service", () => {
     });
   });
 });
+
+describe("briefMe with mentions", () => {
+  let db: Database.Database;
+  let svc: ReturnType<typeof createService>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    svc = createService(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("includes mentions section in brief response", async () => {
+    svc.registerProject("acme-app", {
+      display_name: "Acme App",
+      aliases: ["acme"],
+    });
+
+    await svc.postInsight({
+      agentId: "curator/main-abc123",
+      project: "curator",
+      text: "shipped acme instagram cards",
+      tags: ["acme"],
+    });
+
+    const brief = await svc.briefMe("acme-app/main-xyz789", "acme-app");
+    expect(brief.mentions).toBeDefined();
+    expect(brief.mentions).toHaveLength(1);
+    expect(brief.mentions![0].project).toBe("curator");
+  });
+
+  it("returns empty mentions when no cross-project references exist", async () => {
+    svc.registerProject("acme-app", {
+      display_name: "Acme App",
+      aliases: ["acme"],
+    });
+
+    const brief = await svc.briefMe("acme-app/main-xyz789", "acme-app");
+    expect(brief.mentions).toBeDefined();
+    expect(brief.mentions).toHaveLength(0);
+  });
+});
