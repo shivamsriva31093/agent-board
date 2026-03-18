@@ -15,6 +15,7 @@ import type {
   Synthesis,
   AgentMemory,
   Nudge,
+  Project,
 } from "@/lib/types";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -28,12 +29,16 @@ function now(): number {
  * Must be called after sqlite-vec extension is loaded.
  */
 function ensureVecTable(db: Database.Database): void {
-  db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
-      entry_id INTEGER PRIMARY KEY,
-      embedding float[${EMBEDDING_DIM}]
-    )
-  `);
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS entry_embeddings USING vec0(
+        entry_id INTEGER PRIMARY KEY,
+        embedding float[${EMBEDDING_DIM}]
+      )
+    `);
+  } catch {
+    // sqlite-vec extension not loaded (e.g. in tests) — skip
+  }
 }
 
 /**
@@ -118,7 +123,58 @@ export function createService(db: Database.Database) {
   // Ensure vec0 table exists
   ensureVecTable(db);
 
+  // ── Project registry helpers ──────────────────────────────────────
+
+  function registerProject(
+    canonicalId: string,
+    params: {
+      display_name: string;
+      description?: string;
+      aliases?: string[];
+    },
+  ): Project {
+    return q.upsertProject({
+      id: canonicalId,
+      display_name: params.display_name,
+      description: params.description ?? null,
+      aliases: params.aliases ?? [],
+      repo_paths: [canonicalId],
+    });
+  }
+
+  function resolveProject(dir: string): string {
+    const canonical = q.resolveProjectByDir(dir);
+    if (canonical) return canonical;
+
+    // Auto-create minimal project
+    q.upsertProject({
+      id: dir,
+      display_name: dir,
+      description: null,
+      aliases: [],
+      repo_paths: [dir],
+    });
+    return dir;
+  }
+
+  function matchMentions(entryId: number, sourceProject: string, tags: string[]): void {
+    const projects = q.getAllProjects();
+    const tagsLower = tags.map((t) => t.toLowerCase());
+
+    for (const proj of projects) {
+      if (proj.id === sourceProject) continue;
+
+      const matchSet = [proj.id, ...proj.aliases].map((a) => a.toLowerCase());
+      const matched = tagsLower.some((tag) => matchSet.includes(tag));
+      if (matched) {
+        q.insertMention(entryId, proj.id);
+      }
+    }
+  }
+
   return {
+    registerProject,
+    resolveProject,
     // ── postInsight ────────────────────────────────────────────────
 
     async postInsight(params: {
@@ -151,6 +207,10 @@ export function createService(db: Database.Database) {
         tags: params.tags ? JSON.stringify(params.tags) : null,
         created_at: now(),
       });
+
+      // Match mentions against registered projects
+      const entryTags: string[] = params.tags ?? [];
+      matchMentions(entry.id, params.project, entryTags);
 
       // Fire-and-forget: embed and store in vec0
       embedText(params.text)

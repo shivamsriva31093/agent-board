@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { createQueries, type Queries } from "../queries";
+import { createService } from "../service";
 
 // Helper: create a fresh in-memory db with schema applied
 function freshDb(): Database.Database {
@@ -247,6 +248,131 @@ describe("project queries", () => {
 
     it("returns empty array for empty ids", () => {
       expect(q.getEntrySummariesByIds([])).toEqual([]);
+    });
+  });
+});
+
+// ── Service-level tests ────────────────────────────────────────────
+
+// Reuse freshDb under an alias the task spec uses
+const createTestDb = freshDb;
+
+describe("project service", () => {
+  let db: Database.Database;
+  let svc: ReturnType<typeof createService>;
+
+  beforeEach(() => {
+    db = createTestDb();
+    svc = createService(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  describe("registerProject", () => {
+    it("registers a project with aliases", () => {
+      const project = svc.registerProject("acme-app", {
+        display_name: "Acme App",
+        description: "Example backend",
+        aliases: ["acme"],
+      });
+      expect(project.id).toBe("acme-app");
+      expect(project.aliases).toContain("acme");
+      expect(project.repo_paths).toContain("acme-app");
+    });
+  });
+
+  describe("resolveProject", () => {
+    it("resolves known dir to canonical id", () => {
+      svc.registerProject("acme-app", {
+        display_name: "Acme App",
+        aliases: [],
+      });
+      expect(svc.resolveProject("acme-app")).toBe("acme-app");
+    });
+
+    it("auto-creates project for unknown dir", () => {
+      const id = svc.resolveProject("new-project");
+      expect(id).toBe("new-project");
+    });
+  });
+
+  describe("mention matching in postInsight", () => {
+    it("creates entry_mentions when tags match a project alias", async () => {
+      svc.registerProject("acme-app", {
+        display_name: "Acme App",
+        aliases: ["acme", "daily-tests"],
+      });
+
+      const result = await svc.postInsight({
+        agentId: "curator/main-abc123",
+        project: "curator",
+        text: "shipped some acme cards",
+        tags: ["acme", "instagram"],
+      });
+
+      const q = createQueries(db);
+      const mentions = q.getMentions("acme-app", 0, 10);
+      expect(mentions).toHaveLength(1);
+      expect(mentions[0].id).toBe(result.entry_id);
+    });
+
+    it("skips self-mentions", async () => {
+      svc.registerProject("acme-app", {
+        display_name: "Acme App",
+        aliases: ["acme"],
+      });
+
+      await svc.postInsight({
+        agentId: "acme-app/main-abc123",
+        project: "acme-app",
+        text: "working on acme stuff",
+        tags: ["acme"],
+      });
+
+      const q = createQueries(db);
+      const mentions = q.getMentions("acme-app", 0, 10);
+      expect(mentions).toHaveLength(0);
+    });
+
+    it("matches multiple projects from one post", async () => {
+      svc.registerProject("acme-app", {
+        display_name: "Acme App",
+        aliases: ["acme"],
+      });
+      svc.registerProject("blendermind", {
+        display_name: "BlenderMind",
+        aliases: ["blender-mcp"],
+      });
+
+      await svc.postInsight({
+        agentId: "curator/main-abc123",
+        project: "curator",
+        text: "cross-project post",
+        tags: ["acme", "blender-mcp"],
+      });
+
+      const q = createQueries(db);
+      expect(q.getMentions("acme-app", 0, 10)).toHaveLength(1);
+      expect(q.getMentions("blendermind", 0, 10)).toHaveLength(1);
+    });
+
+    it("matches case-insensitively", async () => {
+      svc.registerProject("acme-app", {
+        display_name: "Acme App",
+        aliases: ["acme"],
+      });
+
+      await svc.postInsight({
+        agentId: "curator/main-abc123",
+        project: "curator",
+        text: "test",
+        tags: ["Acme"],
+      });
+
+      const q = createQueries(db);
+      expect(q.getMentions("acme-app", 0, 10)).toHaveLength(1);
     });
   });
 });
