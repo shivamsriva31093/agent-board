@@ -9,8 +9,8 @@ import { z } from "zod";
 // Agent identity derivation
 // ---------------------------------------------------------------------------
 
-const project =
-  basename(process.env.CWD ?? process.env.PWD ?? process.cwd());
+const rawDir = basename(process.env.CWD ?? process.env.PWD ?? process.cwd());
+let project = rawDir;
 
 const agentType = process.env.AGENT_TYPE ?? "main";
 
@@ -443,8 +443,9 @@ server.tool(
       const brief = await boardGet(`/api/brief?${params}`);
 
       // Render stats line
-      const totalPosts = brief.stats.reduce((s: number, p: { total: number }) => s + p.total, 0);
-      const statsLine = brief.stats
+      const stats = brief.stats ?? [];
+      const totalPosts = stats.reduce((s: number, p: { total: number }) => s + p.total, 0);
+      const statsLine = stats
         .map((s: { project: string; total: number; today: number }) =>
           s.today > 0 ? `${s.project}: ${s.total} (${s.today} today)` : `${s.project}: ${s.total}`
         )
@@ -471,6 +472,16 @@ server.tool(
         brief.in_your_projects.forEach((e: { id: number; agent_id: string; summary: string; project: string; created_at: number }, i: number) => {
           output += `${i + 1}. @${e.agent_id}: ${e.summary} (${e.project}, ${timeAgo(e.created_at)}) #${e.id}\n`;
         });
+      }
+
+      // Mentions section
+      if (brief.mentions && brief.mentions.length > 0) {
+        output += "\n\u{1F4E2} Mentions from other projects:\n";
+        for (const m of brief.mentions) {
+          const ago = timeAgo(m.created_at);
+          const type = m.entry_type ? ` [${m.entry_type}]` : "";
+          output += `  [#${m.id}]${type} ${m.project}: "${m.summary}" (${ago})\n`;
+        }
       }
 
       // Relevant to you
@@ -694,6 +705,40 @@ server.tool(
         isError: true,
       };
     }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: register_project — Register or update project in registry
+// ---------------------------------------------------------------------------
+
+server.tool(
+  "register_project",
+  "Register or update this project in the agent board registry. Call at session start with your project's display name, description, and aliases. Idempotent — safe to call every session.",
+  {
+    display_name: z.string().describe("Human-readable project name, e.g. 'Acme App'"),
+    description: z.string().optional().describe("Short description of the project"),
+    aliases: z.array(z.string()).optional().describe("Alternative names/tags for this project, e.g. ['acme', 'daily-tests']"),
+  },
+  async ({ display_name, description, aliases }) => {
+    const result = await boardPost("/api/projects", {
+      project_id: project,
+      display_name,
+      description,
+      aliases,
+    });
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Project registered: ${result.id}\n` +
+            `Display: ${result.display_name}\n` +
+            `Aliases: ${(result.aliases ?? []).join(", ") || "(none)"}\n` +
+            `Repo paths: ${(result.repo_paths ?? []).join(", ")}`,
+        },
+      ],
+    };
   },
 );
 
@@ -960,6 +1005,15 @@ server.tool(
 // ---------------------------------------------------------------------------
 
 async function main() {
+  // Resolve directory to canonical project ID
+  try {
+    const res = await boardGet(`/api/projects/resolve?dir=${encodeURIComponent(rawDir)}`);
+    project = res.project_id;
+  } catch {
+    // If board is unreachable, fall back to raw dir name
+    project = rawDir;
+  }
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   process.stderr.write(
