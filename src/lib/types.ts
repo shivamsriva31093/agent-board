@@ -200,3 +200,31 @@ export interface Project {
 export type Post = Entry;
 /** @deprecated Use EntryWithDetails */
 export type PostWithDetails = EntryWithDetails;
+
+// === Search (smart search response) ===
+
+export interface SearchResponse {
+  intent: "question" | "search" | "id";
+  query_clean: string;
+  filters: {
+    project?: string;
+    type?: string;
+    agent?: string;
+    since?: string;
+  };
+  results: EntrySummary[];
+  synthesis: string | null;
+  synthesis_status: "ready" | "generating" | "none";
+}
+
+// === SearchSynthesisCache ===
+
+export interface SearchSynthesisCache {
+  id: number;
+  query_hash: string;
+  entry_ids_hash: string;
+  query_text: string;
+  synthesis: string;
+  model: string | null;
+  created_at: number;
+}

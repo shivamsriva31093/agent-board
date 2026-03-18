@@ -24,6 +24,19 @@ function now(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+function resolveSince(since: string): number | null {
+  const n = now();
+  switch (since) {
+    case "today": return n - 86400;
+    case "week": return n - 7 * 86400;
+    case "month": return n - 30 * 86400;
+    default: {
+      const d = Date.parse(since);
+      return isNaN(d) ? null : Math.floor(d / 1000);
+    }
+  }
+}
+
 /**
  * Ensures the vec0 virtual table exists for semantic search.
  * Must be called after sqlite-vec extension is loaded.
@@ -480,6 +493,7 @@ export function createService(db: Database.Database) {
       query: string,
       limit: number = 5,
       project?: string,
+      filters?: { type?: string; agent?: string; since?: string },
     ): Promise<EntrySummary[]> {
       let result: EntrySummary[];
 
@@ -513,6 +527,12 @@ export function createService(db: Database.Database) {
             const entry = q.getEntry(row.entry_id);
             if (!entry) continue;
             if (project && entry.agent.project !== project) continue;
+            if (filters?.type && entry.entry_type !== filters.type) continue;
+            if (filters?.agent && entry.agent_id !== filters.agent) continue;
+            if (filters?.since) {
+              const sinceTs = resolveSince(filters.since);
+              if (sinceTs && entry.created_at < sinceTs) continue;
+            }
 
             summaries.push({
               id: entry.id,
@@ -579,6 +599,34 @@ export function createService(db: Database.Database) {
       }
 
       return result;
+    },
+
+    // ── Synthesis Cache ─────────────────────────────────────────────
+    getCachedSynthesis(queryHash: string, entryIdsHash: string): string | null {
+      const oneHourAgo = now() - 3600;
+      const row = db.prepare(
+        `SELECT synthesis FROM search_synthesis_cache
+         WHERE query_hash = ? AND entry_ids_hash = ? AND created_at > ?`
+      ).get(queryHash, entryIdsHash, oneHourAgo) as { synthesis: string } | undefined;
+      return row?.synthesis ?? null;
+    },
+
+    cacheSynthesis(queryHash: string, entryIdsHash: string, queryText: string, synthesis: string, model: string) {
+      db.prepare(
+        `INSERT INTO search_synthesis_cache (query_hash, entry_ids_hash, query_text, synthesis, model, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(query_hash, entry_ids_hash) DO UPDATE SET
+           synthesis = excluded.synthesis, model = excluded.model, created_at = excluded.created_at`
+      ).run(queryHash, entryIdsHash, queryText, synthesis, model, now());
+    },
+
+    cleanupSynthesisCache() {
+      const sevenDaysAgo = now() - 7 * 86400;
+      db.prepare("DELETE FROM search_synthesis_cache WHERE created_at < ?").run(sevenDaysAgo);
+    },
+
+    getEntriesByIds(ids: number[]) {
+      return q.getEntriesByIds(ids);
     },
 
     // ── contextFor ─────────────────────────────────────────────────
@@ -1168,4 +1216,14 @@ export function getTotalPostCount(): number {
 
 export function getAgent(agentId: string): Agent | undefined {
   return getService().getAgent(agentId);
+}
+
+export function getCachedSynthesis(queryHash: string, entryIdsHash: string) {
+  return getService().getCachedSynthesis(queryHash, entryIdsHash);
+}
+export function cacheSynthesis(queryHash: string, entryIdsHash: string, queryText: string, synthesis: string, model: string) {
+  return getService().cacheSynthesis(queryHash, entryIdsHash, queryText, synthesis, model);
+}
+export function getEntriesByIds(ids: number[]) {
+  return getService().getEntriesByIds(ids);
 }

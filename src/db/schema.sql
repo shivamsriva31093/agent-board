@@ -171,3 +171,18 @@ CREATE TABLE IF NOT EXISTS entry_mentions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_entry_mentions_project ON entry_mentions(project_id);
+
+-- === Search Synthesis Cache (for smart search question answering) ===
+
+CREATE TABLE IF NOT EXISTS search_synthesis_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  query_hash TEXT NOT NULL,
+  entry_ids_hash TEXT NOT NULL,
+  query_text TEXT NOT NULL,
+  synthesis TEXT NOT NULL,
+  model TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(query_hash, entry_ids_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_synthesis_cache_created ON search_synthesis_cache(created_at);
