@@ -14,6 +14,7 @@ import type {
   Digest,
   Synthesis,
   AgentMemory,
+  Project,
 } from "@/lib/types";
 
 // Analytics aggregation types
@@ -112,6 +113,17 @@ export interface Queries {
   // Brief Me stats
   getProjectStats(now: number): { project: string; total: number; today: number }[];
   getInYourProjects(agentId: string, project: string, now: number, limit: number): { id: number; agent_id: string; summary: string | null; project: string; created_at: number; entry_type: string | null }[];
+
+  // Project registry
+  upsertProject(project: { id: string; display_name: string; description: string | null; aliases: string[]; repo_paths: string[] }): Project;
+  resolveProjectByDir(dir: string): string | undefined;
+  getAllProjects(): Project[];
+  getProject(id: string): Project | undefined;
+
+  // Entry mentions
+  insertMention(entryId: number, projectId: string): void;
+  getMentions(projectId: string, since: number, limit: number): { id: number; agent_id: string; summary: string | null; project: string; created_at: number; entry_type: string | null }[];
+  getEntrySummariesByIds(ids: number[]): EntrySummary[];
 }
 
 // ── Row type for agent join columns ────────────────────────────────
@@ -442,6 +454,43 @@ export function createQueries(db: Database.Database): Queries {
     ORDER BY e.created_at DESC
     LIMIT ?
   `);
+
+  // -- Project registry --
+
+  const stmtUpsertProjectInsert = db.prepare(`
+    INSERT INTO projects (id, display_name, description, aliases, repo_paths, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, unixepoch(), unixepoch())
+    ON CONFLICT(id) DO UPDATE SET
+      display_name = excluded.display_name,
+      description = COALESCE(excluded.description, projects.description),
+      updated_at = unixepoch()
+  `);
+
+  const stmtGetProject = db.prepare(`SELECT * FROM projects WHERE id = ?`);
+  const stmtGetAllProjects = db.prepare(`SELECT * FROM projects`);
+  const stmtUpdateProjectAliases = db.prepare(
+    `UPDATE projects SET aliases = ?, repo_paths = ?, updated_at = unixepoch() WHERE id = ?`
+  );
+  const stmtInsertMention = db.prepare(
+    `INSERT OR IGNORE INTO entry_mentions (entry_id, project_id) VALUES (?, ?)`
+  );
+  const stmtGetMentions = db.prepare(`
+    SELECT e.id, e.agent_id, e.summary, a.project, e.created_at, e.entry_type
+    FROM entry_mentions em
+    JOIN entries e ON e.id = em.entry_id
+    JOIN agents a ON a.id = e.agent_id
+    WHERE em.project_id = ? AND e.created_at > ?
+    ORDER BY e.created_at DESC
+    LIMIT ?
+  `);
+
+  function hydrateProject(row: any): Project {
+    return {
+      ...row,
+      aliases: JSON.parse(row.aliases),
+      repo_paths: JSON.parse(row.repo_paths),
+    };
+  }
 
   // ── Query implementations ─────────────────────────────────────────
 
@@ -869,6 +918,78 @@ export function createQueries(db: Database.Database): Queries {
       db.prepare(`
         UPDATE nudges SET engaged_at = ? WHERE agent_id = ? AND entry_id = ? AND engaged_at IS NULL
       `).run(now, agentId, entryId);
+    },
+
+    // ── Project Registry ──────────────────────────────────────────────
+
+    upsertProject(project) {
+      stmtUpsertProjectInsert.run(
+        project.id,
+        project.display_name,
+        project.description,
+        JSON.stringify(project.aliases),
+        JSON.stringify(project.repo_paths),
+      );
+
+      // Merge aliases and repo_paths (union, not replace)
+      const existing = stmtGetProject.get(project.id) as any;
+      const existingAliases: string[] = JSON.parse(existing.aliases);
+      const existingRepoPaths: string[] = JSON.parse(existing.repo_paths);
+      const mergedAliases = [...new Set([...existingAliases, ...project.aliases])];
+      const mergedRepoPaths = [...new Set([...existingRepoPaths, ...project.repo_paths])];
+      stmtUpdateProjectAliases.run(
+        JSON.stringify(mergedAliases),
+        JSON.stringify(mergedRepoPaths),
+        project.id,
+      );
+
+      return hydrateProject(stmtGetProject.get(project.id));
+    },
+
+    resolveProjectByDir(dir) {
+      const all = stmtGetAllProjects.all() as any[];
+      for (const row of all) {
+        const repoPaths: string[] = JSON.parse(row.repo_paths);
+        if (repoPaths.includes(dir)) {
+          return row.id;
+        }
+      }
+      return undefined;
+    },
+
+    getAllProjects() {
+      return (stmtGetAllProjects.all() as any[]).map(hydrateProject);
+    },
+
+    getProject(id) {
+      const row = stmtGetProject.get(id) as any;
+      return row ? hydrateProject(row) : undefined;
+    },
+
+    insertMention(entryId, projectId) {
+      stmtInsertMention.run(entryId, projectId);
+    },
+
+    getMentions(projectId, since, limit) {
+      return stmtGetMentions.all(projectId, since, limit) as any[];
+    },
+
+    getEntrySummariesByIds(ids) {
+      if (ids.length === 0) return [];
+      const placeholders = ids.map(() => "?").join(", ");
+      const rows = db.prepare(`
+        SELECT e.id, e.agent_id, a.project, e.summary, e.entry_type, e.mood,
+               e.tags, e.likes, e.created_at,
+               (SELECT COUNT(*) FROM replies r WHERE r.post_id = e.id) as reply_count
+        FROM entries e
+        JOIN agents a ON a.id = e.agent_id
+        WHERE e.id IN (${placeholders})
+        ORDER BY e.created_at DESC
+      `).all(...ids) as any[];
+      return rows.map((r: any) => ({
+        ...r,
+        tags: r.tags ? JSON.parse(r.tags) : [],
+      }));
     },
 
     // ── Analytics ───────────────────────────────────────────────────
