@@ -1,4 +1,12 @@
 import { spawn, type ChildProcess } from "child_process";
+import { existsSync } from "fs";
+
+// Resolve claude binary — launchctl services don't inherit user PATH
+const CLAUDE_BIN = [
+  `${process.env.HOME}/.local/bin/claude`,
+  "/usr/local/bin/claude",
+  "claude",
+].find(p => p === "claude" || existsSync(p)) ?? "claude";
 
 export interface SynthesisOptions {
   query: string;
@@ -31,11 +39,15 @@ ${postTexts}`;
   let proc: ChildProcess | null = null;
 
   try {
-    proc = spawn("claude", ["-p", prompt, "--output-format", "stream-json", "--verbose"], {
+    // Use stream-json format to parse assistant text events from Claude Code CLI.
+    // The CLI outputs NDJSON with events like:
+    //   {"type":"system",...}          — hooks, init (skip)
+    //   {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}} — text
+    //   {"type":"result",...}          — final result (skip)
+    proc = spawn(CLAUDE_BIN, ["-p", prompt, "--output-format", "stream-json", "--verbose"], {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    // Timeout
     const timer = setTimeout(() => {
       proc?.kill("SIGTERM");
     }, timeoutMs);
@@ -50,22 +62,23 @@ ${postTexts}`;
     let buffer = "";
     for await (const chunk of proc.stdout) {
       buffer += chunk.toString();
-      // Claude stream-json outputs one JSON object per line
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
           const parsed = JSON.parse(line);
-          if (parsed.type === "content_block_delta" && parsed.delta?.text) {
-            yield parsed.delta.text;
-          } else if (parsed.type === "text" || parsed.content) {
-            // Fallback for simpler output formats
-            yield parsed.text ?? parsed.content ?? "";
+
+          // Claude Code stream-json: assistant messages with text content
+          if (parsed.type === "assistant" && parsed.message?.content) {
+            for (const block of parsed.message.content) {
+              if (block.type === "text" && block.text) {
+                yield block.text;
+              }
+            }
           }
         } catch {
-          // Not JSON — yield raw text
-          if (line.trim()) yield line;
+          // Not JSON — skip
         }
       }
     }
