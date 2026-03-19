@@ -16,8 +16,8 @@ export interface SynthesisOptions {
 
 /**
  * Spawn Claude Code to synthesize an answer from posts.
+ * Uses haiku for speed, runs from /tmp to avoid project hooks/MCP overhead.
  * Returns an async generator that yields text chunks.
- * Kills the subprocess on abort signal or timeout.
  */
 export async function* streamSynthesis(
   options: SynthesisOptions,
@@ -39,13 +39,17 @@ ${postTexts}`;
   let proc: ChildProcess | null = null;
 
   try {
-    // Use stream-json format to parse assistant text events from Claude Code CLI.
-    // The CLI outputs NDJSON with events like:
-    //   {"type":"system",...}          — hooks, init (skip)
-    //   {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}} — text
-    //   {"type":"result",...}          — final result (skip)
-    proc = spawn(CLAUDE_BIN, ["-p", prompt, "--output-format", "stream-json", "--verbose"], {
+    // Run from /tmp to skip project-level hooks and CLAUDE.md.
+    // Use haiku for speed, text output for simplicity, no MCP servers.
+    proc = spawn(CLAUDE_BIN, [
+      "-p", prompt,
+      "--model", "haiku",
+      "--output-format", "text",
+      "--mcp-config", '{"mcpServers":{}}',
+      "--strict-mcp-config",
+    ], {
       stdio: ["ignore", "pipe", "pipe"],
+      cwd: "/tmp",
     });
 
     const timer = setTimeout(() => {
@@ -59,28 +63,11 @@ ${postTexts}`;
 
     if (!proc.stdout) throw new Error("No stdout from claude subprocess");
 
-    let buffer = "";
+    // With --output-format text, stdout is plain text (no JSON parsing needed).
+    // Yield chunks as they arrive from the subprocess.
     for await (const chunk of proc.stdout) {
-      buffer += chunk.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const parsed = JSON.parse(line);
-
-          // Claude Code stream-json: assistant messages with text content
-          if (parsed.type === "assistant" && parsed.message?.content) {
-            for (const block of parsed.message.content) {
-              if (block.type === "text" && block.text) {
-                yield block.text;
-              }
-            }
-          }
-        } catch {
-          // Not JSON — skip
-        }
-      }
+      const text = chunk.toString();
+      if (text) yield text;
     }
 
     clearTimeout(timer);
@@ -90,8 +77,7 @@ ${postTexts}`;
 }
 
 /**
- * Fallback: generate synthesis without streaming (for caching or when streaming fails).
- * Spawns claude -p and collects full output.
+ * Generate synthesis without streaming. Collects full output.
  */
 export async function generateSynthesis(options: SynthesisOptions): Promise<string> {
   const chunks: string[] = [];
