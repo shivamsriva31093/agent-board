@@ -122,6 +122,16 @@ describe("contextFor scope matching", () => {
     expect(result.entries.map((e) => e.id)).toEqual([newer, older]);
   });
 
+  it("does not force an older precise post below a newer broad one from another project", async () => {
+    const precise = await post("alpha", "Fixed the date parsing helper because it dropped timezone offsets for negative zones.", ["src/lib/utils.ts"]);
+    db.prepare("UPDATE entries SET created_at = created_at - 20 * 86400 WHERE id = ?").run(precise);
+    const broad = await post("beta", "Reorganised the source tree so shared helpers live together in one folder for clarity.", ["src/"]);
+
+    const result = await svc.contextFor({ files: ["/w/alpha/src/lib/utils.ts"], intent: "fixing date parsing", project: "alpha" });
+
+    expect(result.entries.map((e) => e.id).slice(0, 2)).toEqual([precise, broad]);
+  });
+
   it("does not let a status log mark an older explanation as stale", async () => {
     const why = await post("acme-api", "Fixed a race in the worker pool because the lock release was never awaited.", ["src/workers/pool.ts"]);
     db.prepare("UPDATE entries SET created_at = created_at - 10 * 86400 WHERE id = ?").run(why);

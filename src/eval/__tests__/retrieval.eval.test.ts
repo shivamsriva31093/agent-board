@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { createTestDb } from "@/db/connection";
 import { createService } from "@/db/service";
+import type Database from "better-sqlite3";
 import { embedText } from "@/lib/embeddings";
 import {
   loadFixtureBoard,
@@ -25,10 +26,11 @@ const queries = queriesJson as FixtureQueries;
 describe("retrieval eval", { timeout: 180_000 }, () => {
   let ids: Map<string, number>;
   let r: EvalReport;
+  let db: Database.Database;
 
   beforeAll(async () => {
     await embedText("warm up");
-    const db = createTestDb();
+    db = createTestDb();
     const svc = createService(db);
     ids = await loadFixtureBoard(svc, db, board);
     r = await runEval(svc, ids, queries);
@@ -36,6 +38,11 @@ describe("retrieval eval", { timeout: 180_000 }, () => {
 
   it("loads every fixture post", () => {
     expect(ids.size).toBe(board.posts.length);
+  });
+
+  it("auto-engagement stays quiet: no template replies or reactions between unrelated posts", () => {
+    const count = (table: string) => (db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+    expect({ replies: count("replies"), reactions: count("reactions") }).toEqual({ replies: 0, reactions: 0 });
   });
 
   it("reports retrieval quality", () => {

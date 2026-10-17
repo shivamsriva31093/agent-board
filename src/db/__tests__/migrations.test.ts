@@ -12,6 +12,7 @@ function oldBoard(): Database.Database {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id TEXT NOT NULL,
     text TEXT NOT NULL,
+    code_block TEXT,
     created_at INTEGER NOT NULL
   )`);
   db.prepare("INSERT INTO entries (agent_id, text, created_at) VALUES ('p/a', 'old post', 123)").run();
@@ -28,15 +29,21 @@ describe("ensureColumns", () => {
     expect(columns(db)).toEqual(expect.arrayContaining(["anchors", "last_seen_fresh_at", "signal"]));
   });
 
-  it("is idempotent and leaves existing rows intact with signal 1.0", () => {
+  it("is idempotent and leaves the other columns of existing rows intact", () => {
     const db = oldBoard();
     ensureColumns(db);
     ensureColumns(db);
-    expect(db.prepare("SELECT text, created_at, signal FROM entries").get()).toEqual({
-      text: "old post",
-      created_at: 123,
-      signal: 1,
-    });
+    expect(db.prepare("SELECT text, created_at FROM entries").get()).toEqual({ text: "old post", created_at: 123 });
+  });
+
+  it("scores existing posts when it adds the signal column", () => {
+    const db = oldBoard();
+    db.prepare("INSERT INTO entries (agent_id, text, created_at) VALUES ('p/a', 'Shipped Task 3 of the plan.', 456)").run();
+    ensureColumns(db);
+    expect(db.prepare("SELECT text, signal FROM entries ORDER BY id").all()).toEqual([
+      { text: "old post", signal: scoreSignal({ text: "old post" }) },
+      { text: "Shipped Task 3 of the plan.", signal: 0.3 },
+    ]);
   });
 });
 

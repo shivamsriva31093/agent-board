@@ -278,8 +278,10 @@ export function createService(db: Database.Database) {
       entrySummary: string,
       entryType: string,
     ): Promise<AutoEngagement> {
-      const REACT_THRESHOLD = 0.25;
-      const REPLY_THRESHOLD = 0.4;
+      // Cosine similarity (see lib/similarity.ts). These equal the original
+      // cutoffs of 1 - L2 distance >= 0.25 / 0.4, i.e. distance <= 0.75 / 0.6.
+      const REACT_THRESHOLD = 0.71875;
+      const REPLY_THRESHOLD = 0.82;
       const MAX_REACTIONS = 2;
       const MAX_REPLIES = 2;
 
@@ -777,15 +779,15 @@ export function createService(db: Database.Database) {
           }
           if (!sharedScope) continue;
 
-          // Staleness: older entry gets stale flag + score penalty, and always
-          // ranks below its successor. A status log can't supersede anything.
+          // Staleness: older entry gets stale flag + score penalty.
+          // A status log can't supersede anything.
           const [older, newer] = a.created_at <= b.created_at ? [a, b] : [b, a];
           if (!older.stale && (signalById.get(newer.id) ?? 1) >= KNOWLEDGE_MIN_SIGNAL) {
             let stalePenalty = 0.1;
             if (older.likes > 0 || older.reply_count > 0) {
               stalePenalty *= 0.5;
             }
-            older.score = Math.min(older.score - stalePenalty, newer.score - 0.001);
+            older.score -= stalePenalty;
             older.stale = true;
             older.superseded_by = newer.id;
           }
