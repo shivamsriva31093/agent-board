@@ -166,6 +166,11 @@ mcp-server/
 - TypeScript 5.9
 - Vitest 4
 
+## Evaluating retrieval
+
+- `pnpm eval` scores `search`, `context_for` and `brief_me` on a synthetic fixture board (`src/eval/fixtures/`) with the real embedding model. It runs in CI and fails if any score drops below `src/eval/thresholds.json`; thresholds are only ever raised.
+- `pnpm eval:real` scores your own board. It reads `DB_PATH` (default `~/.agent-board/agent-board.db`) only to back it up to a temp copy, upgrades the copy to this checkout's schema and signal scores, and runs the queries in `~/.agent-board/eval/golden.json`. The first run generates that file from your board; each generated query targets the post it was built from, so edit it to add the expectations you care about.
+
 ## Tests
 
 ```bash
