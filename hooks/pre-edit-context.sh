@@ -1,47 +1,44 @@
 #!/bin/bash
-# Pre-edit hook: injects agent-board context before Edit/Write tool calls.
-# Reads tool input JSON from stdin, extracts file_path, calls the board API.
+# PreToolUse hook (matcher: Edit|Write): surfaces agent-board knowledge and
+# active claims for the file being edited, once per file per session.
+#
+# Claude Code only passes PreToolUse output to the model as JSON
+# `additionalContext`, which arrives alongside the tool result, so the agent
+# sees it right after its first edit to a file. Never blocks: always exits 0.
 
 BOARD_API="${BOARD_API:-http://localhost:3333}"
 
-# Read tool input from stdin
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .file_path // empty' 2>/dev/null)
+FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .file_path // empty' 2>/dev/null)
 if [ -z "$FILE_PATH" ]; then exit 0; fi
+SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)}"
+PROJECT=$(basename "${PROJECT_DIR:-$PWD}")
 
-# Dedup: skip if already fetched this session ($$ scopes to this shell process tree)
-CACHE="/tmp/agent-board-context-$$"
-if [ -f "$CACHE" ] && grep -qF "$FILE_PATH" "$CACHE" 2>/dev/null; then exit 0; fi
+# Dedup per session (each hook call is a new process, so key on session_id)
+CACHE="${TMPDIR:-/tmp}/agent-board-context-${SESSION_ID:-nosession}"
+if [ -f "$CACHE" ] && grep -qxF "$FILE_PATH" "$CACHE" 2>/dev/null; then exit 0; fi
 echo "$FILE_PATH" >> "$CACHE"
 
 # Fetch context (2s timeout — never block work)
-ENCODED=$(printf '%s' "$FILE_PATH" | jq -sRr @uri 2>/dev/null || printf '%s' "$FILE_PATH")
-RESULT=$(curl -s --max-time 2 \
-  "${BOARD_API}/api/entries/context?files=${ENCODED}&max_tokens=300" \
-  2>/dev/null)
-if [ -z "$RESULT" ] || [ "$RESULT" = "null" ]; then exit 0; fi
+RESULT=$(curl -s --max-time 2 -G "${BOARD_API}/api/entries/context" \
+  --data-urlencode "files=${FILE_PATH}" \
+  --data-urlencode "project=${PROJECT}" \
+  --data-urlencode "max_tokens=300" 2>/dev/null)
+if [ -z "$RESULT" ]; then exit 0; fi
 
-# Check if there's anything to show
-ENTRY_COUNT=$(echo "$RESULT" | jq '.entries | length' 2>/dev/null || echo "0")
-CLAIM_COUNT=$(echo "$RESULT" | jq '.claims | length' 2>/dev/null || echo "0")
-CONFLICT_COUNT=$(echo "$RESULT" | jq '.conflicts | length' 2>/dev/null || echo "0")
+CONTEXT=$(printf '%s' "$RESULT" | jq -r --arg file "$FILE_PATH" '
+  (.claims // []) as $claims
+  | ((.entries // [])[:5]) as $entries
+  | if ($claims | length) == 0 and ($entries | length) == 0 then empty else
+      ( ["[agent-board context for \($file)]"]
+        + [ (.conflicts // [])[] | "⚠ CONFLICT on \(.scope): " + (.entries | map("#\(.id) \(.entry_type // "note"): \(.summary // "(no summary)")") | join(" ↔ ")) ]
+        + [ $claims[] | "⚠ \(.agent_id) has \"\(.scope)\" claimed (\(.scope_type))" ]
+        + [ $entries[] | "• [\(.entry_type // "note")\(if .stale then " ⚠ stale" else "" end)] \(.summary // "(no summary)") (id:\(.id))" ]
+        + ["Full details: agent-board get_entry(id)."]
+      ) | join("\n")
+    end' 2>/dev/null)
+if [ -z "$CONTEXT" ]; then exit 0; fi
 
-if [ "$ENTRY_COUNT" = "0" ] && [ "$CLAIM_COUNT" = "0" ]; then exit 0; fi
-
-# Format output
-echo "[agent-board context for $FILE_PATH]"
-
-# Conflicts first
-if [ "$CONFLICT_COUNT" != "0" ] && [ "$CONFLICT_COUNT" != "null" ]; then
-  echo "$RESULT" | jq -r '.conflicts[]? | "\u26a0 CONFLICT on \(.scope): " + (.entries | map("#\(.id) \(.entry_type // "note"): \(.summary // "(no summary)")") | join(" \u2194 "))'
-fi
-
-# Claims
-if [ "$CLAIM_COUNT" != "0" ]; then
-  echo "$RESULT" | jq -r '.claims[]? | "\u26a0 \(.agent_id) has \"\(.scope)\" claimed (\(.scope_type))"'
-fi
-
-# Entries (top 5)
-if [ "$ENTRY_COUNT" != "0" ]; then
-  echo "$RESULT" | jq -r '.entries[:5][] | "\u2022 [\(.entry_type // "note")\(if .stale then " \u26a0 stale" else "" end)] \(.summary // "(no summary)") (id:\(.id))"'
-fi
+jq -n --arg ctx "$CONTEXT" '{hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $ctx}}'
+exit 0
