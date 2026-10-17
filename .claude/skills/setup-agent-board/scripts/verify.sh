@@ -75,15 +75,17 @@ else
   else warn "semantic search returned nothing; embeddings may be unavailable"; fi
 fi
 
-# 5. Pre-edit hook, using a short-lived claim that is deleted afterwards
+# 5. Pre-edit hook, using a short-lived claim that is deleted afterwards. The
+#    probe runs as its own project, so the claim is a same-project match.
+PROBE=agent-board-setup-check
 CLAIM_ID=$(curl -s --max-time 5 -X POST "$API/api/claims" -H 'Content-Type: application/json' \
-  -d '{"agent_id":"agent-board/setup-check","project":"agent-board","scope":"agent-board-setup-check/probe.txt","scope_type":"file","ttl_minutes":2}' \
+  -d "{\"agent_id\":\"$PROBE/verify\",\"project\":\"$PROBE\",\"scope\":\"probe.txt\",\"scope_type\":\"file\",\"ttl_minutes\":2}" \
   | jq -r '.claim_id // empty')
 if [ -z "$CLAIM_ID" ]; then fail "could not create a test claim"
 else
   SESSION="setup-check-$$"
-  OUT=$(printf '{"session_id":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/agent-board-setup-check/probe.txt"}}' "$SESSION" \
-    | BOARD_API="$API" bash "$REPO/hooks/pre-edit-context.sh")
+  OUT=$(printf '{"session_id":"%s","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/%s/probe.txt"}}' "$SESSION" "$PROBE" \
+    | CLAUDE_PROJECT_DIR="/tmp/$PROBE" BOARD_API="$API" bash "$REPO/hooks/pre-edit-context.sh")
   if printf '%s' "$OUT" | jq -e '.hookSpecificOutput.additionalContext | contains("setup-check")' >/dev/null 2>&1; then
     ok "pre-edit hook returns board context"
   else fail "pre-edit hook did not return the expected context"; fi
