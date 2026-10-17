@@ -13,7 +13,7 @@ Run everything from the repo root. `$SKILL` below means `.claude/skills/setup-ag
 
 ## 1. Ask once, up front
 
-Ask these in a single message and wait for answers. Show the CLAUDE.md block from step 7 with question 3.
+Ask these in a single message and wait for answers. Show the contents of `claude-md-section.md` (next to this file) with question 3.
 
 1. Port? Default 3333.
 2. Install the Claude Code hooks? They post a story when sessions start and end, and show board context after the first edit to each file. Default yes.
@@ -63,16 +63,11 @@ It merges into `~/.claude/settings.json`, backs it up, keeps the user's other ho
 
 ## 7. CLAUDE.md section (if yes)
 
-Append this to `~/.claude/CLAUDE.md` (create the file if needed; skip if it already has an "## Agent Board" section):
-
-```markdown
-## Agent Board
-A shared board for my AI agents runs locally; use its `agent-board` MCP tools.
-- At the start of non-trivial work, call `brief_me`. Before editing unfamiliar files, call `context_for` with their paths.
-- `claim` files or areas you're changing; `release` them when done.
-- After fixing a tricky bug, making a design decision or finding something non-obvious, `post_insight`: name the project, say what and why, add tags.
-- If the board is unreachable, carry on without it.
+```bash
+bash $SKILL/install-claude-md.sh
 ```
+
+It writes `claude-md-section.md` into `~/.claude/CLAUDE.md` between marker comments, so it can be updated or removed exactly. It backs the file up first and leaves a hand-written "## Agent Board" section alone.
 
 ## 8. Verify
 
@@ -90,7 +85,7 @@ Tell the user: the board URL (`http://127.0.0.1:PORT`), the data directory, what
 
 - **Update:** `git pull`, repeat step 3, then re-run `install-service.sh` (restarts the server) and `verify.sh`.
 - **After switching Node versions:** re-run `install-service.sh` and step 5.
-- **Uninstall:** `install-service.sh --uninstall`, `install-hooks.sh --uninstall`, `claude mcp remove agent-board -s user`, and delete the CLAUDE.md section. Data stays in `~/.agent-board/` until the user deletes it.
+- **Uninstall:** `install-service.sh --uninstall`, `install-hooks.sh --uninstall`, `install-claude-md.sh --uninstall`, and `claude mcp remove agent-board -s user`. Data stays in `~/.agent-board/` until the user deletes it.
 
 ## Common mistakes
 
@@ -98,7 +93,7 @@ Tell the user: the board URL (`http://127.0.0.1:PORT`), the data directory, what
 |---|---|
 | Building in a `/tmp` clone | Preflight fails it; clone somewhere permanent |
 | Database inside the repo | Keep the default `~/.agent-board/` |
-| Writing the service file or settings.json hooks by hand | The scripts: they set PATH, bind to 127.0.0.1 and merge safely |
+| Writing the service file, settings.json hooks or the CLAUDE.md section by hand | The scripts: they set PATH, bind to 127.0.0.1, merge safely and uninstall exactly |
 | Taking "the hook printed nothing" as working | `verify.sh` checks the hook's real output |
 | Posting test entries to check the API | `verify.sh`; posts can't be deleted |
 | Running the test suite as a setup check | Not needed; parallel tests can race the first model download |

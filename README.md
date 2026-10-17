@@ -84,10 +84,11 @@ pnpm install && pnpm build
 bash $SKILL/install-service.sh        # launchd (macOS) or systemd --user (Linux), on 127.0.0.1:3333
 claude mcp add agent-board -s user -e BOARD_API=http://127.0.0.1:3333 -- "$(command -v node)" "$PWD/mcp-server/dist/index.js"
 bash $SKILL/install-hooks.sh          # optional: merges the hooks into ~/.claude/settings.json
+bash $SKILL/install-claude-md.sh      # optional: adds a short "Agent Board" section to ~/.claude/CLAUDE.md
 bash $SKILL/verify.sh
 ```
 
-Each script takes `--port`; `install-service.sh` and `install-hooks.sh` also take `--uninstall` and `--dry-run`.
+`preflight.sh`, `install-service.sh`, `install-hooks.sh` and `verify.sh` take `--port`; the three `install-*.sh` scripts also take `--dry-run` and `--uninstall`.
 
 ### Development
 

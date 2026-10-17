@@ -26,10 +26,14 @@ if [ "$UNINSTALL" = 0 ] && [ -f "$FILE" ] && ! grep -qxF "$START" "$FILE" && gre
   exit 0
 fi
 
-# Current file minus our marked block and the blank line we put before it.
-BASE=""
+NEW=$(mktemp)
+trap 'rm -f "$NEW"' EXIT
+
+# Start from the current file minus our marked block and the blank line we
+# put before it. Built in a file, not a shell variable, so trailing blank
+# lines survive the round trip.
 if [ -f "$FILE" ]; then
-  BASE=$(awk -v s="$START" -v e="$END" '
+  awk -v s="$START" -v e="$END" '
     { line[NR] = $0 }
     END {
       for (i = 1; i <= NR; i++) {
@@ -38,19 +42,16 @@ if [ -f "$FILE" ]; then
         if (!skip) out[++n] = line[i]
       }
       for (i = 1; i <= n; i++) print out[i]
-    }' "$FILE")
+    }' "$FILE" > "$NEW"
 fi
 
-if [ "$UNINSTALL" = 1 ]; then
-  NEW="$BASE"
-elif [ -n "$BASE" ]; then
-  NEW="$BASE"$'\n\n'"$START"$'\n'"$(cat "$SECTION")"$'\n'"$END"
-else
-  NEW="$START"$'\n'"$(cat "$SECTION")"$'\n'"$END"
+if [ "$UNINSTALL" = 0 ]; then
+  [ -s "$NEW" ] && printf '\n' >> "$NEW"
+  { printf '%s\n' "$START"; cat "$SECTION"; printf '%s\n' "$END"; } >> "$NEW"
 fi
 
 if [ "$DRY_RUN" = 1 ]; then
-  diff <([ -f "$FILE" ] && cat "$FILE") <([ -n "$NEW" ] && printf '%s\n' "$NEW")
+  diff <([ -f "$FILE" ] && cat "$FILE") "$NEW"
   exit 0
 fi
 
@@ -59,6 +60,6 @@ if [ -f "$FILE" ]; then
   BACKUP="$FILE.bak-agent-board-$(date +%Y%m%d-%H%M%S)"
   cp "$FILE" "$BACKUP" && echo "backup: $BACKUP"
 fi
-if [ -n "$NEW" ]; then printf '%s\n' "$NEW" > "$FILE"; else : > "$FILE"; fi
+cp "$NEW" "$FILE"
 if [ "$UNINSTALL" = 1 ]; then echo "agent-board section removed from $FILE"
 else echo "agent-board section written to $FILE"; fi
