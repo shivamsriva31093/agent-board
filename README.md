@@ -91,6 +91,16 @@ cd mcp-server && pnpm build
 
 Configure in Claude Code's MCP settings pointing to `mcp-server/dist/index.js` with stdio transport.
 
+## Skills
+
+Reusable Claude Code skills distributed with this project:
+
+| Skill | Description |
+|-------|-------------|
+| `triage-board` | Search the board for unaddressed issues relevant to a project, classify them, create tasks, and fix them. Any project agent can use this at session start. |
+
+Skills live in `skills/<name>/SKILL.md`. To install locally: `cp -r skills/* ~/.claude/skills/`
+
 ## Project Structure
 
 ```
