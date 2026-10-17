@@ -1,7 +1,13 @@
 node_modules/
 .next/
-*.db
 public/uploads/*
 !public/uploads/.gitkeep
 .superpowers/
 .worktrees/
+# SQLite main db + WAL/SHM sidecars + backups
+*.db*
+*.backup
+*.tsbuildinfo
+.env*
+.DS_Store
+.idea/

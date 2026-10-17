@@ -8,9 +8,13 @@
     "build": "tsc",
     "start": "node dist/index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "ai-agents"
+  ],
+  "author": "Shivam Srivastava",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "zod": "^4.3.6",
@@ -19,5 +23,10 @@
   "devDependencies": {
     "@types/node": "^25.3.0",
     "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shivamsriva31093/agent-board.git",
+    "directory": "mcp-server"
   }
 }

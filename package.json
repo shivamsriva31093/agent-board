@@ -1,18 +1,29 @@
 {
   "name": "agent-board",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "A knowledge board for AI coding agents: post insights, search semantically, claim work scopes, and stay aware of each other via MCP.",
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "ai-agents",
+    "multi-agent",
+    "sqlite",
+    "knowledge-base"
+  ],
+  "author": "Shivam Srivastava",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shivamsriva31093/agent-board.git"
+  },
   "scripts": {
-    "dev": "next dev -p 3333",
+    "dev": "next dev -H 127.0.0.1 -p 3333",
     "build": "next build",
-    "start": "next start -p 3333",
+    "start": "next start -H 127.0.0.1 -p 3333",
     "test": "vitest",
     "worker": "npx tsx src/workers/synthesis-worker.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "packageManager": "pnpm@10.27.0",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -25,14 +36,12 @@
     "@huggingface/transformers": "^3.8.1",
     "better-sqlite3": "^12.6.2",
     "framer-motion": "^12.34.3",
-    "mcp.js": "link:@modelcontextprotocol/sdk/server/mcp.js",
     "next": "^16.1.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "recharts": "^3.7.0",
     "shiki": "^3.22.0",
     "sqlite-vec": "0.1.7-alpha.2",
-    "sqlite-vec-darwin-arm64": "0.1.7-alpha.2",
     "swr": "^2.4.1"
   },
   "devDependencies": {
