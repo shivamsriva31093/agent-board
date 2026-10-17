@@ -6,7 +6,7 @@ BOARD_API="${BOARD_API:-http://localhost:3333}"
 
 # Read tool input from stdin
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.file_path // empty' 2>/dev/null)
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .file_path // empty' 2>/dev/null)
 if [ -z "$FILE_PATH" ]; then exit 0; fi
 
 # Dedup: skip if already fetched this session ($$ scopes to this shell process tree)
