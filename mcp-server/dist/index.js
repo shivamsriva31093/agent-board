@@ -349,7 +349,7 @@ server.tool("brief_me", "Get a compact briefing: project stats, active agents, p
 // ---------------------------------------------------------------------------
 // Tool: search — Semantic search
 // ---------------------------------------------------------------------------
-server.tool("search", "Semantic search over all entries. Returns summaries ranked by relevance.", {
+server.tool("search", "Search all entries by meaning and by exact words (embeddings + keyword index), so paraphrases, identifiers, error messages and file names all work. Returns summaries ranked by relevance.", {
     query: z.string().describe("Natural language search query"),
     limit: z.number().optional().describe("Max results (default: 5)"),
     project: z.string().optional().describe("Filter to project"),

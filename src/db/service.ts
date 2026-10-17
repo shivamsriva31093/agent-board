@@ -7,6 +7,7 @@ import { embedText, EMBEDDING_DIM } from "@/lib/embeddings";
 import { relevantMatchDepth } from "@/lib/scope-match";
 import { scoreSignal, rankingWeight, KNOWLEDGE_MIN_SIGNAL } from "@/lib/signal";
 import { distanceToSimilarity } from "@/lib/similarity";
+import { toFtsQuery, fuseRanks } from "@/lib/hybrid";
 import type {
   Agent,
   EntryWithDetails,
@@ -501,96 +502,96 @@ export function createService(db: Database.Database) {
       project?: string,
       filters?: { type?: string; agent?: string; since?: string },
     ): Promise<EntrySummary[]> {
-      let result: EntrySummary[];
-
-      let queryEmbedding: Float32Array | null = null;
+      // Hybrid search: vector KNN and BM25 over the FTS index, merged by
+      // reciprocal-rank fusion, then weighted by signal so status logs sink.
+      // Either channel alone still answers when the other is unavailable.
+      const depth = Math.max(50, limit * 6);
+      let queryEmbedding: Buffer | null = null;
       try {
-        queryEmbedding = await embedText(query);
+        queryEmbedding = Buffer.from((await embedText(query)).buffer);
       } catch (err) {
-        console.warn("[search] embedding failed, falling back to FTS5:", (err as Error).message);
+        console.warn("[search] embedding failed, using lexical search only:", (err as Error).message);
       }
 
+      let vectorIds: number[] = [];
+      let vectorAvailable = false;
       if (queryEmbedding) {
         try {
-          // Search sqlite-vec for similar entries
-          const rows = db
-            .prepare(
-              `SELECT entry_id, distance
-               FROM entry_embeddings
-               WHERE embedding MATCH ? AND k = ?
-               ORDER BY distance`,
-            )
-            .all(Buffer.from(queryEmbedding.buffer), limit * 3) as {
-            entry_id: number;
-            distance: number;
-          }[];
-
-          // Fetch entry summaries and optionally filter by project, then rank
-          // by similarity weighted by signal so status logs sink.
-          const summaries: (EntrySummary & { rank: number })[] = [];
-          for (const row of rows) {
-            const entry = q.getEntry(row.entry_id);
-            if (!entry) continue;
-            if (project && entry.agent.project !== project) continue;
-            if (filters?.type && entry.entry_type !== filters.type) continue;
-            if (filters?.agent && entry.agent_id !== filters.agent) continue;
-            if (filters?.since) {
-              const sinceTs = resolveSince(filters.since);
-              if (sinceTs && entry.created_at < sinceTs) continue;
-            }
-
-            summaries.push({
-              id: entry.id,
-              agent_id: entry.agent_id,
-              project: entry.agent.project,
-              summary: entry.summary,
-              entry_type: entry.entry_type,
-              mood: entry.mood,
-              tags: entry.parsed_tags,
-              likes: entry.likes,
-              reply_count: entry.replies.length,
-              created_at: entry.created_at,
-              similarity: distanceToSimilarity(row.distance),
-              rank: distanceToSimilarity(row.distance) * rankingWeight(entry.signal),
-            });
-          }
-
-          result = summaries
-            .sort((a, b) => b.rank - a.rank)
-            .slice(0, limit)
-            .map(({ rank: _rank, ...summary }) => summary);
+          vectorIds = (
+            db
+              .prepare("SELECT entry_id FROM entry_embeddings WHERE embedding MATCH ? AND k = ? ORDER BY distance")
+              .all(queryEmbedding, depth) as { entry_id: number }[]
+          ).map((r) => r.entry_id);
+          vectorAvailable = true;
         } catch (err) {
-          // vec0 table missing (e.g. in tests) — fall back to FTS5
-          console.warn("[search] vec query failed, falling back to FTS5:", (err as Error).message);
-          result = q.searchEntries(query, limit).map(e => ({
-            id: e.id,
-            agent_id: e.agent_id,
-            project: e.agent.project,
-            summary: e.summary,
-            entry_type: e.entry_type,
-            mood: e.mood,
-            tags: e.parsed_tags,
-            likes: e.likes,
-            reply_count: e.replies.length,
-            created_at: e.created_at,
-            similarity: 0,
-          }));
+          // vec0 table missing (e.g. in tests)
+          console.warn("[search] vector query failed, using lexical search only:", (err as Error).message);
         }
-      } else {
-        // Embedding failed — use FTS5 text search
-        result = q.searchEntries(query, limit).map(e => ({
-          id: e.id,
-          agent_id: e.agent_id,
-          project: e.agent.project,
-          summary: e.summary,
-          entry_type: e.entry_type,
-          mood: e.mood,
-          tags: e.parsed_tags,
-          likes: e.likes,
-          reply_count: e.replies.length,
-          created_at: e.created_at,
-          similarity: 0,
-        }));
+      }
+
+      let lexicalIds: number[] = [];
+      const ftsQuery = toFtsQuery(query);
+      if (ftsQuery) {
+        try {
+          lexicalIds = (
+            db
+              .prepare("SELECT rowid AS id FROM entries_fts WHERE entries_fts MATCH ? ORDER BY bm25(entries_fts) LIMIT ?")
+              .all(ftsQuery, depth) as { id: number }[]
+          ).map((r) => r.id);
+        } catch (err) {
+          console.warn("[search] lexical query failed:", (err as Error).message);
+        }
+      }
+
+      const fused = fuseRanks([vectorIds, lexicalIds], 10);
+      const signals = new Map<number, number>();
+      if (fused.length > 0) {
+        const rows = db
+          .prepare(`SELECT id, signal FROM entries WHERE id IN (${fused.map(() => "?").join(",")})`)
+          .all(...fused.map((f) => f.id)) as { id: number; signal: number }[];
+        for (const r of rows) signals.set(r.id, r.signal);
+      }
+      const ranked = fused
+        .map((f) => ({ id: f.id, rank: f.score * rankingWeight(signals.get(f.id) ?? 1) }))
+        .sort((a, b) => b.rank - a.rank);
+
+      // Cosine similarity for returned entries, including lexical-only matches.
+      const distanceStmt = vectorAvailable
+        ? db.prepare("SELECT vec_distance_l2(embedding, ?) AS d FROM entry_embeddings WHERE entry_id = ?")
+        : null;
+      const similarityOf = (id: number): number | undefined => {
+        try {
+          const row = distanceStmt?.get(queryEmbedding, id) as { d: number } | undefined;
+          return row ? distanceToSimilarity(row.d) : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+
+      const sinceTs = filters?.since ? resolveSince(filters.since) : null;
+      const result: EntrySummary[] = [];
+      for (const { id } of ranked) {
+        if (result.length >= limit) break;
+        const entry = q.getEntry(id);
+        if (!entry) continue;
+        if (project && entry.agent.project !== project) continue;
+        if (filters?.type && entry.entry_type !== filters.type) continue;
+        if (filters?.agent && entry.agent_id !== filters.agent) continue;
+        if (sinceTs && entry.created_at < sinceTs) continue;
+
+        result.push({
+          id: entry.id,
+          agent_id: entry.agent_id,
+          project: entry.agent.project,
+          summary: entry.summary,
+          entry_type: entry.entry_type,
+          mood: entry.mood,
+          tags: entry.parsed_tags,
+          likes: entry.likes,
+          reply_count: entry.replies.length,
+          created_at: entry.created_at,
+          similarity: similarityOf(entry.id),
+        });
       }
 
       // If project filter is set, also include entries that mention this project

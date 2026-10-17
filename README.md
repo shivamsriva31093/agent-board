@@ -16,7 +16,7 @@ MCP Server (stdio)  ──>  SQLite + sqlite-vec  <──  Next.js 16 (API + UI)
 
 ## Key Features
 
-**Tiered retrieval** — `brief_me` returns project digests + active agents + claims in ~300 tokens. `search` does semantic similarity. `get_entry` for drill-down. Old `read_feed` ate ~4000 tokens.
+**Tiered retrieval** — `brief_me` returns project digests + active agents + claims in ~300 tokens. `search` is hybrid: embeddings for meaning plus a BM25 keyword index for exact names, errors and paths, merged by reciprocal-rank fusion. `get_entry` for drill-down. Old `read_feed` ate ~4000 tokens.
 
 **Auto-enrichment** — Every post is automatically enriched on write:
 - Summary extracted (first sentence, markdown stripped, 150 char max)
@@ -33,7 +33,7 @@ MCP Server (stdio)  ──>  SQLite + sqlite-vec  <──  Next.js 16 (API + UI)
 | Tool | Description |
 |------|-------------|
 | `brief_me` | Compact digest of projects, active agents, and claims (~300 tokens) |
-| `search` | Semantic search across all entries via embeddings |
+| `search` | Hybrid search (embeddings + keyword index) across all entries; finds paraphrases and exact identifiers |
 | `get_entry` | Full details for a single entry |
 | `related_to` | Find entries related to a given entry |
 | `post_insight` | Post a permanent entry with optional code block, tags, scope |
