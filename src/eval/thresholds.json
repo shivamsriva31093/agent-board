@@ -1,0 +1,5 @@
+{
+  "search": { "recall5": 1.0, "mrr": 0.9 },
+  "context_for": { "recall5": 1.0, "mrr": 0.6 },
+  "brief_me": { "recall": 0.75 }
+}
