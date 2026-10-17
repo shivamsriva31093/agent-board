@@ -5,6 +5,8 @@ import { createQueries, type Queries } from "@/db/queries";
 import { extractSummary, classifyEntryType } from "@/lib/text-processing";
 import { embedText, EMBEDDING_DIM } from "@/lib/embeddings";
 import { scopeMatchDepth, isRelevantScopeMatch } from "@/lib/scope-match";
+import { scoreSignal, SUPERSEDE_MIN_SIGNAL } from "@/lib/signal";
+import { distanceToSimilarity } from "@/lib/similarity";
 import type {
   Agent,
   EntryWithDetails,
@@ -220,6 +222,7 @@ export function createService(db: Database.Database) {
         screenshot: params.screenshotPath ?? null,
         tags: params.tags ? JSON.stringify(params.tags) : null,
         created_at: now(),
+        signal: scoreSignal({ text: params.text, hasCode: params.codeBlock !== undefined }),
       });
 
       // Match mentions against registered projects
@@ -515,16 +518,15 @@ export function createService(db: Database.Database) {
                WHERE embedding MATCH ? AND k = ?
                ORDER BY distance`,
             )
-            .all(Buffer.from(queryEmbedding.buffer), limit * 2) as {
+            .all(Buffer.from(queryEmbedding.buffer), limit * 3) as {
             entry_id: number;
             distance: number;
           }[];
 
-          // Fetch entry summaries and optionally filter by project
-          const summaries: EntrySummary[] = [];
+          // Fetch entry summaries and optionally filter by project, then rank
+          // by similarity weighted by signal so status logs sink.
+          const summaries: (EntrySummary & { rank: number })[] = [];
           for (const row of rows) {
-            if (summaries.length >= limit) break;
-
             const entry = q.getEntry(row.entry_id);
             if (!entry) continue;
             if (project && entry.agent.project !== project) continue;
@@ -546,11 +548,15 @@ export function createService(db: Database.Database) {
               likes: entry.likes,
               reply_count: entry.replies.length,
               created_at: entry.created_at,
-              similarity: 1 - row.distance,
+              similarity: distanceToSimilarity(row.distance),
+              rank: distanceToSimilarity(row.distance) * entry.signal,
             });
           }
 
-          result = summaries;
+          result = summaries
+            .sort((a, b) => b.rank - a.rank)
+            .slice(0, limit)
+            .map(({ rank: _rank, ...summary }) => summary);
         } catch (err) {
           // vec0 table missing (e.g. in tests) — fall back to FTS5
           console.warn("[search] vec query failed, falling back to FTS5:", (err as Error).message);
@@ -702,7 +708,7 @@ export function createService(db: Database.Database) {
             entry_id: number;
             distance: number;
           }[];
-          for (const row of rows) similarityById.set(row.entry_id, 1 - row.distance);
+          for (const row of rows) similarityById.set(row.entry_id, distanceToSimilarity(row.distance));
         } catch {
           // Embeddings unavailable — fall back to scope matches alone.
         }
@@ -711,10 +717,12 @@ export function createService(db: Database.Database) {
       // 3. Score and rank
       const scored: (EntrySummary & { score: number; stale?: boolean; superseded_by?: number })[] = [];
       const scopesByEntryId = new Map<number, string[]>();
+      const signalById = new Map<number, number>();
       for (const entryId of new Set([...scopeMatched, ...similarityById.keys()])) {
         const entry = q.getEntry(entryId);
         if (!entry) continue;
         scopesByEntryId.set(entry.id, entry.parsed_scope);
+        signalById.set(entry.id, entry.signal);
 
         const similarity = similarityById.get(entryId) ?? 0;
         const scopeBoost = scopeMatched.has(entryId) ? 1 : 0;
@@ -723,7 +731,8 @@ export function createService(db: Database.Database) {
         const daysOld = Math.max(0, (ts - entry.created_at) / 86400);
         const recency = 1 / (1 + daysOld / 30);
 
-        const score = similarity * 0.6 + scopeBoost * 0.25 + recency * 0.15;
+        // Status logs (low signal) sink below posts that explain something.
+        const score = (similarity * 0.6 + scopeBoost * 0.25 + recency * 0.15) * entry.signal;
 
         scored.push({
           id: entry.id,
@@ -768,14 +777,15 @@ export function createService(db: Database.Database) {
           }
           if (!sharedScope) continue;
 
-          // Staleness: older entry gets stale flag + score penalty
+          // Staleness: older entry gets stale flag + score penalty, and always
+          // ranks below its successor. A status log can't supersede anything.
           const [older, newer] = a.created_at <= b.created_at ? [a, b] : [b, a];
-          if (!older.stale) {
+          if (!older.stale && (signalById.get(newer.id) ?? 1) >= SUPERSEDE_MIN_SIGNAL) {
             let stalePenalty = 0.1;
             if (older.likes > 0 || older.reply_count > 0) {
               stalePenalty *= 0.5;
             }
-            older.score -= stalePenalty;
+            older.score = Math.min(older.score - stalePenalty, newer.score - 0.001);
             older.stale = true;
             older.superseded_by = newer.id;
           }

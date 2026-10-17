@@ -9,6 +9,7 @@ vi.mock("@/lib/embeddings", () => ({
 import { createTestDb } from "@/db/connection";
 import { createService } from "@/db/service";
 import { createQueries, type Queries } from "@/db/queries";
+import type Database from "better-sqlite3";
 
 // The pre-edit hook sends absolute paths and no intent; agents mostly post
 // scopes relative to wherever they were running.
@@ -17,9 +18,10 @@ const HOOK_FILE = "/Users/someone/codes/mono/agent-board/hooks/pre-edit-context.
 describe("contextFor scope matching", () => {
   let svc: ReturnType<typeof createService>;
   let q: Queries;
+  let db: Database.Database;
 
   beforeEach(() => {
-    const db = createTestDb();
+    db = createTestDb();
     svc = createService(db);
     q = createQueries(db);
   });
@@ -96,6 +98,32 @@ describe("contextFor scope matching", () => {
     const result = await svc.contextFor({ files: [HOOK_FILE], intent: "", project: "agent-board" });
 
     expect(result.claims.map((c) => c.agent_id)).toEqual(["agent-board/other-def"]);
+  });
+
+  it("ranks a knowledge post above a status log on the same file", async () => {
+    // Realistic order: the explanation is older, the status log is newer.
+    const why = await post("acme-api", "Fixed a race in the worker pool because the lock release was never awaited.", ["src/workers/pool.ts"]);
+    db.prepare("UPDATE entries SET created_at = created_at - 10 * 86400 WHERE id = ?").run(why);
+    const log = await post("acme-api", "Shipped Task 2 of the pool plan.", ["src/workers/pool.ts"]);
+
+    const result = await svc.contextFor({ files: ["/w/acme-api/src/workers/pool.ts"], intent: "", project: "acme-api" });
+
+    expect(result.entries.map((e) => e.id)).toEqual([why, log]);
+  });
+
+  it("does not let a status log mark an older explanation as stale", async () => {
+    const why = await post("acme-api", "Fixed a race in the worker pool because the lock release was never awaited.", ["src/workers/pool.ts"]);
+    db.prepare("UPDATE entries SET created_at = created_at - 10 * 86400 WHERE id = ?").run(why);
+    await post("acme-api", "Shipped Task 2 of the pool plan.", ["src/workers/pool.ts"]);
+
+    const result = await svc.contextFor({ files: ["/w/acme-api/src/workers/pool.ts"], intent: "", project: "acme-api" });
+
+    expect(result.entries.find((e) => e.id === why)?.stale).toBeFalsy();
+  });
+
+  it("stores the signal score on new posts", async () => {
+    const id = await post("acme-api", "WIP on the dashboard");
+    expect(q.getEntry(id)!.signal).toBeCloseTo(0.3, 5);
   });
 
   it("does not create a project for an unknown caller project", async () => {

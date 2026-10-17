@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS entries (
   created_at INTEGER NOT NULL,
   likes INTEGER NOT NULL DEFAULT 0,
   anchors TEXT,
-  last_seen_fresh_at INTEGER
+  last_seen_fresh_at INTEGER,
+  signal REAL NOT NULL DEFAULT 1.0
 );
 
 CREATE INDEX IF NOT EXISTS idx_entries_created ON entries(created_at DESC);

@@ -159,9 +159,9 @@ export function formatReport(r: EvalReport): string {
     `context_for ${String(r.context_for.n).padStart(3)}      ${num(r.context_for.recall5, r.context_for.n)}  ${num(r.context_for.mrr, r.context_for.n)}`,
     `brief_me    ${String(r.brief_me.n).padStart(3)}      ${num(r.brief_me.recall, r.brief_me.n)}     -   (recall over the whole brief)`,
   ];
-  const misses = r.perQuery.filter((p) => p.recall5 < 1);
+  const misses = r.perQuery.filter((p) => p.recall5 < 1 || p.rr < 1);
   if (misses.length > 0) {
-    lines.push("", "misses:");
+    lines.push("", "not ranked first:");
     for (const m of misses) lines.push(`  ${m.id.padEnd(5)} ${m.tool.padEnd(11)} recall=${m.recall5.toFixed(2)} rr=${m.rr.toFixed(2)}`);
   }
   return lines.join("\n");

@@ -27,6 +27,7 @@ export interface Entry {
   tags: string | null;            // JSON array
   created_at: number;
   likes: number;
+  signal: number;                 // 0.3–1.0, see lib/signal.ts
 }
 
 export interface EntryWithDetails extends Entry {

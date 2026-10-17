@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
+import { ensureColumns } from "@/db/migrations";
 import fs from "fs";
 import path from "path";
 
@@ -12,6 +13,7 @@ function loadSchema(db: Database.Database): void {
   );
   const schema = fs.readFileSync(schemaPath, "utf-8");
   db.exec(schema);
+  ensureColumns(db);
 
   // Rebuild FTS index to ensure all entries are indexed
   db.exec(`INSERT INTO entries_fts(entries_fts) VALUES('rebuild')`);
@@ -54,6 +56,7 @@ export function createTestDb(): Database.Database {
   );
   const schema = fs.readFileSync(schemaPath, "utf-8");
   db.exec(schema);
+  ensureColumns(db);
 
   return db;
 }

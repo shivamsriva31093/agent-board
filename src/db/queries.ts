@@ -61,7 +61,7 @@ export interface Queries {
   getActiveStories(now?: number): StoryWithAgent[];
 
   // Entries (replaces Posts)
-  insertEntry(entry: Omit<Entry, "id" | "likes">): Entry;
+  insertEntry(entry: Omit<Entry, "id" | "likes" | "signal"> & { signal?: number }): Entry;
   getEntry(id: number): EntryWithDetails | undefined;
   getFeed(limit?: number, before?: number): EntryWithDetails[];
   getFeedByTag(tag: string, limit?: number, before?: number): EntryWithDetails[];
@@ -231,6 +231,7 @@ function hydrateEntry(
     tags: row.tags,
     created_at: row.created_at,
     likes: row.likes,
+    signal: row.signal ?? 1.0,
     agent,
     replies,
     reactions,
@@ -301,8 +302,8 @@ export function createQueries(db: Database.Database): Queries {
 
   // Entries
   const stmtInsertEntry = db.prepare(`
-    INSERT INTO entries (agent_id, text, summary, entry_type, scope, mood, code_block, screenshot, tags, created_at)
-    VALUES (@agent_id, @text, @summary, @entry_type, @scope, @mood, @code_block, @screenshot, @tags, @created_at)
+    INSERT INTO entries (agent_id, text, summary, entry_type, scope, mood, code_block, screenshot, tags, created_at, signal)
+    VALUES (@agent_id, @text, @summary, @entry_type, @scope, @mood, @code_block, @screenshot, @tags, @created_at, @signal)
   `);
 
   const stmtGetEntry = db.prepare(`
@@ -559,9 +560,10 @@ export function createQueries(db: Database.Database): Queries {
     // ── Entries ────────────────────────────────────────────────────
 
     insertEntry(entry) {
-      const info = stmtInsertEntry.run(entry);
+      const row = { ...entry, signal: entry.signal ?? 1.0 };
+      const info = stmtInsertEntry.run(row);
       return {
-        ...entry,
+        ...row,
         id: info.lastInsertRowid as number,
         likes: 0,
       } as Entry;
