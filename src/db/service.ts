@@ -4,6 +4,7 @@ import { getDb } from "@/db/connection";
 import { createQueries, type Queries } from "@/db/queries";
 import { extractSummary, classifyEntryType } from "@/lib/text-processing";
 import { embedText, EMBEDDING_DIM } from "@/lib/embeddings";
+import { scopeMatchDepth, isRelevantScopeMatch } from "@/lib/scope-match";
 import type {
   Agent,
   EntryWithDetails,
@@ -635,6 +636,8 @@ export function createService(db: Database.Database) {
       files: string[];
       intent: string;
       maxTokens?: number;
+      /** Caller's project or repo directory name; single-segment scope matches only count within it. */
+      project?: string;
     }): Promise<{
       entries: (EntrySummary & { score: number; stale?: boolean; superseded_by?: number })[];
       claims: ClaimWithAgent[];
@@ -644,53 +647,77 @@ export function createService(db: Database.Database) {
     }> {
       const maxTokens = params.maxTokens ?? 600;
       const ts = now();
-
-      // 1. Build composite query and embed
-      const queryText = `${params.intent} ${params.files.join(" ")}`;
-      let queryEmbedding: Float32Array;
-      try {
-        queryEmbedding = await embedText(queryText);
-      } catch {
-        return { entries: [], claims: [], conflicts: [], truncated: false, syntheses: [] };
-      }
-
-      // 2. KNN search — over-fetch for filtering headroom
+      const intent = params.intent.trim();
       const candidateCount = Math.max(10, Math.ceil((maxTokens / 50) * 2));
-      const rows = db
-        .prepare(
-          `SELECT entry_id, distance
-           FROM entry_embeddings
-           WHERE embedding MATCH ? AND k = ?
-           ORDER BY distance`,
-        )
-        .all(Buffer.from(queryEmbedding.buffer), candidateCount) as {
-        entry_id: number;
-        distance: number;
-      }[];
+      // Lookup only: unlike resolveProject(), this must not register new projects.
+      const project = params.project
+        ? (q.resolveProjectByDir(params.project) ?? params.project)
+        : undefined;
+      const fileMatchDepth = (scope: string, sameProject: boolean): number => {
+        let best = 0;
+        for (const file of params.files) {
+          const depth = scopeMatchDepth(scope, file);
+          if (isRelevantScopeMatch(depth, sameProject)) best = Math.max(best, depth);
+        }
+        return best;
+      };
+
+      // 1. Scope candidates: entries whose scope names one of the files or an
+      //    ancestor directory, deepest (most specific) and newest first.
+      const scopeHits: { id: number; depth: number }[] = [];
+      for (const row of q.getScopedEntries()) {
+        let scopes: unknown;
+        try {
+          scopes = JSON.parse(row.scope);
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(scopes)) continue;
+        const sameProject = row.project === project;
+        const depth = Math.max(
+          0,
+          ...scopes.map((s) => (typeof s === "string" ? fileMatchDepth(s, sameProject) : 0)),
+        );
+        if (depth > 0) scopeHits.push({ id: row.id, depth });
+      }
+      scopeHits.sort((a, b) => b.depth - a.depth || b.id - a.id);
+      const scopeMatched = new Set(scopeHits.slice(0, candidateCount).map((h) => h.id));
+
+      // 2. Semantic candidates, only when the caller described what they're
+      //    doing — a bare file path is not a meaningful query. Paths are cut to
+      //    their last segments so machine-specific prefixes don't skew the match.
+      const similarityById = new Map<number, number>();
+      if (intent) {
+        try {
+          const pathTails = params.files.map((f) => f.split("/").filter(Boolean).slice(-3).join("/"));
+          const queryEmbedding = await embedText(`${intent} ${pathTails.join(" ")}`);
+          const rows = db
+            .prepare(
+              `SELECT entry_id, distance
+               FROM entry_embeddings
+               WHERE embedding MATCH ? AND k = ?
+               ORDER BY distance`,
+            )
+            .all(Buffer.from(queryEmbedding.buffer), candidateCount) as {
+            entry_id: number;
+            distance: number;
+          }[];
+          for (const row of rows) similarityById.set(row.entry_id, 1 - row.distance);
+        } catch {
+          // Embeddings unavailable — fall back to scope matches alone.
+        }
+      }
 
       // 3. Score and rank
       const scored: (EntrySummary & { score: number; stale?: boolean; superseded_by?: number })[] = [];
       const scopesByEntryId = new Map<number, string[]>();
-      for (const row of rows) {
-        const entry = q.getEntry(row.entry_id);
+      for (const entryId of new Set([...scopeMatched, ...similarityById.keys()])) {
+        const entry = q.getEntry(entryId);
         if (!entry) continue;
         scopesByEntryId.set(entry.id, entry.parsed_scope);
 
-        const similarity = 1 - row.distance;
-
-        // Scope boost: does entry's scope overlap with any input file?
-        let scopeBoost = 0;
-        if (entry.parsed_scope.length > 0) {
-          for (const entryScope of entry.parsed_scope) {
-            for (const file of params.files) {
-              if (file.startsWith(entryScope) || entryScope.startsWith(file)) {
-                scopeBoost = 1;
-                break;
-              }
-            }
-            if (scopeBoost > 0) break;
-          }
-        }
+        const similarity = similarityById.get(entryId) ?? 0;
+        const scopeBoost = scopeMatched.has(entryId) ? 1 : 0;
 
         // Recency: 1 / (1 + days_old / 30)
         const daysOld = Math.max(0, (ts - entry.created_at) / 86400);
@@ -780,13 +807,17 @@ export function createService(db: Database.Database) {
         entries: entries.sort((a, b) => a.created_at - b.created_at),
       }));
 
-      // 4. Fetch claims overlapping input files
+      // 4. Fetch claims overlapping input files: the original prefix/fuzzy
+      //    rules plus segment matching, so relative claims match absolute paths.
       const claimSet = new Map<number, ClaimWithAgent>();
       for (const file of params.files) {
         const fileClaims = q.getClaimsByScope(file, ts);
         for (const c of fileClaims) {
           claimSet.set(c.id, c);
         }
+      }
+      for (const c of q.getActiveClaims(ts)) {
+        if (fileMatchDepth(c.scope, c.agent.project === project) > 0) claimSet.set(c.id, c);
       }
       const claims = Array.from(claimSet.values());
 

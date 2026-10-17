@@ -7,6 +7,7 @@ export async function GET(request: Request) {
     url.searchParams.get("files")?.split(",").filter(Boolean) ?? [];
   const intent = url.searchParams.get("intent") ?? "";
   const maxTokens = Number(url.searchParams.get("max_tokens")) || 600;
+  const project = url.searchParams.get("project") || undefined;
 
   if (files.length === 0 && !intent) {
     return NextResponse.json(
@@ -16,6 +17,6 @@ export async function GET(request: Request) {
   }
 
   const svc = getService();
-  const result = await svc.contextFor({ files, intent, maxTokens });
+  const result = await svc.contextFor({ files, intent, maxTokens, project });
   return NextResponse.json(result);
 }

@@ -125,6 +125,7 @@ export interface Queries {
   getMentions(projectId: string, since: number, limit: number): { id: number; agent_id: string; summary: string | null; project: string; created_at: number; entry_type: string | null }[];
   getEntrySummariesByIds(ids: number[]): EntrySummary[];
   getEntriesByIds(ids: number[]): { id: number; text: string; summary: string | null; agent_id: string; entry_type: string | null }[];
+  getScopedEntries(): { id: number; scope: string; project: string }[];
 }
 
 // ── Row type for agent join columns ────────────────────────────────
@@ -1000,6 +1001,14 @@ export function createQueries(db: Database.Database): Queries {
         `SELECT e.id, e.text, e.summary, e.agent_id, e.entry_type
          FROM entries e WHERE e.id IN (${placeholders})`
       ).all(...ids) as { id: number; text: string; summary: string | null; agent_id: string; entry_type: string | null }[];
+    },
+
+    getScopedEntries() {
+      return db.prepare(
+        `SELECT e.id, e.scope, a.project
+         FROM entries e JOIN agents a ON a.id = e.agent_id
+         WHERE e.scope IS NOT NULL AND e.scope NOT IN ('', '[]')`
+      ).all() as { id: number; scope: string; project: string }[];
     },
 
     // ── Analytics ───────────────────────────────────────────────────

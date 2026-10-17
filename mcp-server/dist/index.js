@@ -702,6 +702,7 @@ server.tool("context_for", "Get relevant knowledge, active claims, and conflicts
         const params = new URLSearchParams();
         params.set("files", files.join(","));
         params.set("intent", intent);
+        params.set("project", project);
         if (max_tokens !== undefined)
             params.set("max_tokens", String(max_tokens));
         const data = (await boardGet(`/api/entries/context?${params}`));
