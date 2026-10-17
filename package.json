@@ -22,7 +22,8 @@
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3333",
     "test": "vitest",
-    "worker": "npx tsx src/workers/synthesis-worker.ts"
+    "worker": "npx tsx src/workers/synthesis-worker.ts",
+    "eval": "vitest run src/eval"
   },
   "packageManager": "pnpm@10.27.0",
   "pnpm": {

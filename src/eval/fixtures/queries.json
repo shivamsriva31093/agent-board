@@ -1,0 +1,34 @@
+{
+  "search": [
+    {"id": "s1", "query": "worker pool", "project": null, "expected": ["api-pool-race"]},
+    {"id": "s2", "query": "feed query", "project": null, "expected": ["api-pagination-decision"]},
+    {"id": "s3", "query": "JWT verification failing because of clock skew", "project": null, "expected": ["api-auth-jwt-gotcha"]},
+    {"id": "s4", "query": "rate limit by API key rather than IP address", "project": null, "expected": ["api-rate-limit"]},
+    {"id": "s5", "query": "add a NOT NULL column without locking the table", "project": null, "expected": ["api-migrations-lesson"]},
+    {"id": "s6", "query": "hydration mismatch between server and browser time", "project": null, "expected": ["web-hydration-bug"]},
+    {"id": "s7", "query": "why is the javascript bundle so large", "project": null, "expected": ["web-bundle"]},
+    {"id": "s8", "query": "CI pipeline changes", "project": null, "expected": ["tool-ci-cache"]},
+    {"id": "s9", "query": "flaky integration tests timing out", "project": null, "expected": ["tool-flaky-test"]},
+    {"id": "s10", "query": "database connection pool exhaustion in production", "project": null, "expected": ["infra-db-pool"]},
+    {"id": "s11", "query": "how do we know our backups actually work", "project": null, "expected": ["infra-backup"]},
+    {"id": "s12", "query": "checkout total off by a cent", "project": "acme-web", "expected": ["web-checkout-decision"]}
+  ],
+  "context_for": [
+    {"id": "c1", "files": ["/Users/dev/code/acme-api/src/workers/pool.ts"], "intent": "", "project": "acme-api", "expected": ["api-pool-race"]},
+    {"id": "c2", "files": ["/Users/dev/code/acme-api/src/db/feed.ts"], "intent": "", "project": "acme-api", "expected": ["api-pagination-decision"]},
+    {"id": "c3", "files": ["/home/dev/acme-web/src/components/DatePicker.tsx"], "intent": "", "project": "acme-web", "expected": ["web-hydration-bug"]},
+    {"id": "c4", "files": ["/Users/dev/code/tooling/.github/workflows/ci.yml"], "intent": "", "project": "tooling", "expected": ["tool-ci-cache"]},
+    {"id": "c5", "files": ["/srv/infra/deploy/postgres.yaml"], "intent": "", "project": "infra", "expected": ["infra-db-pool"]},
+    {"id": "c6", "files": ["src/auth/jwt.ts"], "intent": "fixing token verification errors", "project": "acme-api", "expected": ["api-auth-jwt-gotcha"]},
+    {"id": "c7", "files": ["src/billing/webhooks.ts"], "intent": "handling duplicate payment events", "project": "acme-api", "expected": ["api-webhook-retry"]},
+    {"id": "c8", "files": ["src/app/checkout/page.tsx"], "intent": "changing how the checkout total is displayed", "project": "acme-web", "expected": ["web-checkout-decision"]},
+    {"id": "c9", "files": ["scripts/release.sh"], "intent": "tagging releases", "project": "tooling", "expected": ["tool-release-knowledge"]},
+    {"id": "c10", "files": ["deploy/dns.tf"], "intent": "planning a DNS migration", "project": "infra", "expected": ["infra-dns"]}
+  ],
+  "brief_me": [
+    {"id": "b1", "agent": "acme-web/reader-0002", "project": "acme-web", "must_include": ["web-checkout-decision"]},
+    {"id": "b2", "agent": "infra/reader-0003", "project": "infra", "must_include": ["infra-alerts"]},
+    {"id": "b3", "agent": "acme-api/reader-0001", "project": "acme-api", "must_include": ["tool-mention-api"]},
+    {"id": "b4", "agent": "acme-api/reader-0001", "project": "acme-api", "must_include": ["api-webhook-retry"]}
+  ]
+}
