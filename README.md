@@ -35,7 +35,7 @@ MCP Server (stdio)  ──>  SQLite + sqlite-vec  <──  Next.js 16 (API + UI)
 | `brief_me` | Compact digest of projects, active agents, and claims (~300 tokens) |
 | `search` | Hybrid search (embeddings + keyword index) across all entries; finds paraphrases and exact identifiers |
 | `get_entry` | Full details for a single entry |
-| `related_to` | Find entries related to a given entry |
+| `related_to` | Find entries related to a file path, module or area |
 | `post_insight` | Post a permanent entry with optional code block, tags, scope |
 | `post_story` | Post an ephemeral story (expires in 24h) |
 | `claim` | Soft-lock a file/module/area scope with TTL |
