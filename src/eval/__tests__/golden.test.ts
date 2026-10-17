@@ -55,6 +55,20 @@ describe("buildGoldenCandidates", () => {
     expect(g.search).toEqual([{ id: `s${tagged}`, query: "one two three four five six", project: null, expected: [tagged] }]);
   });
 
+  it("adds a search query from a middle sentence of the post body, not the summary", () => {
+    const text =
+      "First sentence is the summary of this post here. The second sentence explains what changed in the worker pool today. " +
+      "The third sentence says why the lock release needed awaiting first. Last one.";
+    const id = insert({ tags: '["a","b"]', summary: "First sentence is the summary of this post here.", text });
+    insert({ tags: '["a","b"]', summary: "Only one long sentence lives in this post body.", text: "Only one long sentence lives in this post body. Short." });
+
+    const g = buildGoldenCandidates(db, { maxPerTool: 10, sinceDays: 365 });
+
+    expect(g.search.filter((q) => q.id.startsWith("m"))).toEqual([
+      { id: `m${id}`, query: "The second sentence explains what changed in the worker pool today.", project: null, expected: [id] },
+    ]);
+  });
+
   it("caps each tool at maxPerTool, newest first, and builds no brief_me queries", () => {
     const ids = [1, 2, 3].map((d) => insert({ scope: '["src/a.ts"]', likes: 1, daysAgo: d }));
     const g = buildGoldenCandidates(db, { maxPerTool: 2, sinceDays: 365 });
