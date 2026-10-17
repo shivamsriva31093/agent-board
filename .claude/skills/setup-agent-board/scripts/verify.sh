@@ -93,8 +93,8 @@ fi
 
 # 6. Hooks registered in Claude Code settings
 SETTINGS="$HOME/.claude/settings.json"
-if [ -f "$SETTINGS" ] && [ "$(jq '[.hooks[]?[]?.hooks[]?.command // "" | select(test("agent-board-hook"))] | length' "$SETTINGS" 2>/dev/null)" = "3" ]; then
-  ok "3 agent-board hooks registered in $SETTINGS"
+if [ -f "$SETTINGS" ] && [ "$(jq '[.hooks[]?[]?.hooks[]?.command // "" | select(test("agent-board-hook"))] | length' "$SETTINGS" 2>/dev/null)" = "2" ]; then
+  ok "2 agent-board hooks registered in $SETTINGS (SessionStart, PreToolUse Edit|Write)"
 else
   skip "agent-board hooks not registered in $SETTINGS (only a problem if the user wanted them)"
 fi

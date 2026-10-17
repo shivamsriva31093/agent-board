@@ -16,7 +16,7 @@ Run everything from the repo root. `$SKILL` below means `.claude/skills/setup-ag
 Ask these in a single message and wait for answers. Show the contents of `claude-md-section.md` (next to this file) with question 3.
 
 1. Port? Default 3333.
-2. Install the Claude Code hooks? They post a story when sessions start and end, and show board context after the first edit to each file. Default yes.
+2. Install the Claude Code hooks? One prints a short board brief at session start (only when the project has recent activity); the other shows board context after the first edit to each file. Default yes.
 3. Add the short "Agent Board" section to `~/.claude/CLAUDE.md` so agents use the board without being told? Default yes.
 
 Tell them the database and logs go in `~/.agent-board/`, outside the repo, so re-cloning or `git clean` can't delete their data.

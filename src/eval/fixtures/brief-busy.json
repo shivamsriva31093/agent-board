@@ -1,0 +1,94 @@
+{
+  "now": 1760000000,
+  "brief": {
+    "stats": [
+      {
+        "project": "acme-api",
+        "total": 23,
+        "today": 5
+      },
+      {
+        "project": "acme-web",
+        "total": 12,
+        "today": 2
+      },
+      {
+        "project": "tooling",
+        "total": 9,
+        "today": 0
+      },
+      {
+        "project": "infra",
+        "total": 8,
+        "today": 1
+      }
+    ],
+    "active_agents": [
+      {
+        "id": "acme-api/main-a1b2c3",
+        "current_task": "release checklist"
+      }
+    ],
+    "active_claims": [
+      {
+        "agent_id": "acme-api/main-a1b2c3",
+        "scope": "src/workers/",
+        "expires_in_minutes": 40
+      },
+      {
+        "agent_id": "acme-web/main-d4e5f6",
+        "scope": "src/app/checkout/",
+        "expires_in_minutes": 20
+      },
+      {
+        "agent_id": "infra/main-c0ffee",
+        "scope": "deploy/",
+        "expires_in_minutes": 55
+      }
+    ],
+    "in_your_projects": [
+      {
+        "id": 100,
+        "agent_id": "acme-api/main-b7c8d9",
+        "summary": "Entry 0: the invoice export batches rows in pages of five hundred because one query over the full year timed out on the reporting replica; the batch size came from load tests on the staging replica last month and should ",
+        "project": "acme-api",
+        "created_at": 1759998200,
+        "entry_type": "bugfix"
+      },
+      {
+        "id": 101,
+        "agent_id": "acme-api/main-b7c8d9",
+        "summary": "Entry 1: the invoice export batches rows in pages of five hundred because one query over the full year timed out on the reporting replica; the batch size came from load tests on the staging replica last month and should ",
+        "project": "acme-api",
+        "created_at": 1759996400,
+        "entry_type": "decision"
+      },
+      {
+        "id": 102,
+        "agent_id": "acme-api/main-b7c8d9",
+        "summary": "Entry 2: the invoice export batches rows in pages of five hundred because one query over the full year timed out on the reporting replica; the batch size came from load tests on the staging replica last month and should ",
+        "project": "acme-api",
+        "created_at": 1759994600,
+        "entry_type": "discovery"
+      },
+      {
+        "id": 103,
+        "agent_id": "acme-api/main-b7c8d9",
+        "summary": "Entry 3: the invoice export batches rows in pages of five hundred because one query over the full year timed out on the reporting replica; the batch size came from load tests on the staging replica last month and should ",
+        "project": "acme-api",
+        "created_at": 1759992800,
+        "entry_type": "pattern"
+      },
+      {
+        "id": 104,
+        "agent_id": "acme-api/main-b7c8d9",
+        "summary": "Entry 4: the invoice export batches rows in pages of five hundred because one query over the full year timed out on the reporting replica; the batch size came from load tests on the staging replica last month and should ",
+        "project": "acme-api",
+        "created_at": 1759991000,
+        "entry_type": null
+      }
+    ],
+    "mentions": [],
+    "relevant_to_you": []
+  }
+}

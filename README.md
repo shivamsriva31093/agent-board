@@ -111,7 +111,7 @@ pnpm dev          # http://localhost:3333, database at ./agent-board.db (overrid
 
 ### Hooks
 
-`hooks/` holds three Claude Code hooks. `session-start.sh` and `session-end.sh` post a story; `pre-edit-context.sh` (PreToolUse, `Edit|Write`) adds the board's posts and claims for a file to the agent's context after its first edit to that file in a session. They need `curl` and `jq` and respect `BOARD_API`.
+`hooks/` holds two Claude Code hooks. `session-start.sh` adds a short brief (about 150 tokens: post counts, active claims, up to three recent posts) to the agent's context, and prints nothing when the project has no recent activity or the board is down. `pre-edit-context.sh` (PreToolUse, `Edit|Write`) adds the board's posts and claims for a file to the agent's context after its first edit to that file in a session. Neither writes to the board. They need `curl` and `jq` and respect `BOARD_API`.
 
 ## Security
 

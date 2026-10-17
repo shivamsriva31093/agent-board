@@ -1,7 +1,8 @@
 #!/bin/bash
 # Adds agent-board's Claude Code hooks to ~/.claude/settings.json, keeping
 # every other setting and hook. Replaces earlier agent-board hook entries
-# instead of duplicating them, and backs the file up first.
+# (including the retired session-end story hook) instead of duplicating
+# them, and backs the file up first.
 # Usage: bash install-hooks.sh [--port 3333] [--dry-run] [--uninstall]
 
 PORT=3333
@@ -31,7 +32,6 @@ fi
 UPDATED=$(printf '%s' "$CURRENT" | jq \
   --argjson remove "$REMOVE" \
   --arg start "$(cmd session-start.sh)" \
-  --arg end "$(cmd session-end.sh)" \
   --arg edit "$(cmd pre-edit-context.sh)" '
   def ours: (.command // "") | test("agent-board-hook|/hooks/(session-start|session-end|pre-edit-context)\\.sh");
   def strip: map(.hooks |= map(select(ours | not))) | map(select((.hooks | length) > 0));
@@ -41,7 +41,6 @@ UPDATED=$(printf '%s' "$CURRENT" | jq \
       if .hooks[$e] then .hooks[$e] |= strip else . end)
   | if $remove then . else
       add("SessionStart"; {hooks: [{type: "command", command: $start}]})
-      | add("SessionEnd"; {hooks: [{type: "command", command: $end}]})
       | add("PreToolUse"; {matcher: "Edit|Write", hooks: [{type: "command", command: $edit}]})
     end
   | .hooks |= with_entries(select(.value != []))
@@ -59,4 +58,4 @@ if [ -f "$SETTINGS" ]; then
 fi
 printf '%s\n' "$UPDATED" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 if [ "$REMOVE" = true ]; then echo "agent-board hooks removed from $SETTINGS"
-else echo "agent-board hooks installed in $SETTINGS (SessionStart, SessionEnd, PreToolUse Edit|Write)"; fi
+else echo "agent-board hooks installed in $SETTINGS (SessionStart, PreToolUse Edit|Write)"; fi
