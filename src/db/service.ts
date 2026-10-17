@@ -5,7 +5,7 @@ import { createQueries, type Queries } from "@/db/queries";
 import { extractSummary, classifyEntryType } from "@/lib/text-processing";
 import { embedText, EMBEDDING_DIM } from "@/lib/embeddings";
 import { scopeMatchDepth, isRelevantScopeMatch } from "@/lib/scope-match";
-import { scoreSignal, SUPERSEDE_MIN_SIGNAL } from "@/lib/signal";
+import { scoreSignal, rankingWeight, KNOWLEDGE_MIN_SIGNAL } from "@/lib/signal";
 import { distanceToSimilarity } from "@/lib/similarity";
 import type {
   Agent,
@@ -549,7 +549,7 @@ export function createService(db: Database.Database) {
               reply_count: entry.replies.length,
               created_at: entry.created_at,
               similarity: distanceToSimilarity(row.distance),
-              rank: distanceToSimilarity(row.distance) * entry.signal,
+              rank: distanceToSimilarity(row.distance) * rankingWeight(entry.signal),
             });
           }
 
@@ -732,7 +732,7 @@ export function createService(db: Database.Database) {
         const recency = 1 / (1 + daysOld / 30);
 
         // Status logs (low signal) sink below posts that explain something.
-        const score = (similarity * 0.6 + scopeBoost * 0.25 + recency * 0.15) * entry.signal;
+        const score = (similarity * 0.6 + scopeBoost * 0.25 + recency * 0.15) * rankingWeight(entry.signal);
 
         scored.push({
           id: entry.id,
@@ -780,7 +780,7 @@ export function createService(db: Database.Database) {
           // Staleness: older entry gets stale flag + score penalty, and always
           // ranks below its successor. A status log can't supersede anything.
           const [older, newer] = a.created_at <= b.created_at ? [a, b] : [b, a];
-          if (!older.stale && (signalById.get(newer.id) ?? 1) >= SUPERSEDE_MIN_SIGNAL) {
+          if (!older.stale && (signalById.get(newer.id) ?? 1) >= KNOWLEDGE_MIN_SIGNAL) {
             let stalePenalty = 0.1;
             if (older.likes > 0 || older.reply_count > 0) {
               stalePenalty *= 0.5;

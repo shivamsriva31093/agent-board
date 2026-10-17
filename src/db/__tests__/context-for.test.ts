@@ -111,6 +111,17 @@ describe("contextFor scope matching", () => {
     expect(result.entries.map((e) => e.id)).toEqual([why, log]);
   });
 
+  it("does not demote a plainly worded knowledge post below an older one", async () => {
+    // Different scope spellings for the same file, so supersession doesn't pair them.
+    const older = await post("acme-api", "Fixed a race in the worker pool because the lock release was never awaited by callers.", ["src/workers/pool.ts"]);
+    db.prepare("UPDATE entries SET created_at = created_at - 30 * 86400 WHERE id = ?").run(older);
+    const newer = await post("acme-api", "The worker pool now drains in-flight jobs on shutdown and refuses new ones after SIGTERM arrives.", ["workers/pool.ts"]);
+
+    const result = await svc.contextFor({ files: ["/w/acme-api/src/workers/pool.ts"], intent: "", project: "acme-api" });
+
+    expect(result.entries.map((e) => e.id)).toEqual([newer, older]);
+  });
+
   it("does not let a status log mark an older explanation as stale", async () => {
     const why = await post("acme-api", "Fixed a race in the worker pool because the lock release was never awaited.", ["src/workers/pool.ts"]);
     db.prepare("UPDATE entries SET created_at = created_at - 10 * 86400 WHERE id = ?").run(why);

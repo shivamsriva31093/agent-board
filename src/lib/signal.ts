@@ -13,8 +13,16 @@ const WHY =
 
 export const MIN_SIGNAL = 0.3;
 
-/** Below this an entry is essentially a status log and can't supersede an older post. */
-export const SUPERSEDE_MIN_SIGNAL = 0.6;
+/** Below this an entry is essentially a status log: it can't supersede an older post. */
+export const KNOWLEDGE_MIN_SIGNAL = 0.6;
+
+/**
+ * Multiplier for ranking scores. Status logs sink by their signal; knowledge
+ * posts all weigh 1, so how a post is phrased doesn't reorder knowledge.
+ */
+export function rankingWeight(signal: number): number {
+  return signal >= KNOWLEDGE_MIN_SIGNAL ? 1 : signal;
+}
 
 export function scoreSignal(input: { text: string; hasCode?: boolean }): number {
   const text = input.text.trim();

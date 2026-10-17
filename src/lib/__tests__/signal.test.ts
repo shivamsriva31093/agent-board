@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scoreSignal } from "@/lib/signal";
+import { scoreSignal, rankingWeight } from "@/lib/signal";
 
 describe("scoreSignal", () => {
   it.each([
@@ -24,5 +24,18 @@ describe("scoreSignal", () => {
 
   it("matches the task-done pattern anywhere in the text", () => {
     expect(scoreSignal({ text: "Agent-board: task 7 is done now, moving on to the next part of the plan today." })).toBeCloseTo(0.3, 5);
+  });
+});
+
+describe("rankingWeight", () => {
+  it("scales status logs down by their signal", () => {
+    expect(rankingWeight(0.3)).toBe(0.3);
+    expect(rankingWeight(0.5)).toBe(0.5);
+  });
+
+  it("does not reorder knowledge posts among themselves", () => {
+    expect(rankingWeight(0.6)).toBe(1);
+    expect(rankingWeight(0.7)).toBe(1);
+    expect(rankingWeight(1)).toBe(1);
   });
 });
