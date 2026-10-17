@@ -20,7 +20,8 @@ CACHE="${TMPDIR:-/tmp}/agent-board-context-${SESSION_ID:-nosession}"
 if [ -f "$CACHE" ] && grep -qxF "$FILE_PATH" "$CACHE" 2>/dev/null; then exit 0; fi
 echo "$FILE_PATH" >> "$CACHE"
 
-# Fetch context (2s timeout — never block work)
+# Fetch context (2s timeout — never block work). The API's `conflicts` are
+# left out: on a busy file they are mostly ordinary history, not disagreements.
 RESULT=$(curl -s --max-time 2 -G "${BOARD_API}/api/entries/context" \
   --data-urlencode "files=${FILE_PATH}" \
   --data-urlencode "project=${PROJECT}" \
@@ -32,7 +33,6 @@ CONTEXT=$(printf '%s' "$RESULT" | jq -r --arg file "$FILE_PATH" '
   | ((.entries // [])[:5]) as $entries
   | if ($claims | length) == 0 and ($entries | length) == 0 then empty else
       ( ["[agent-board context for \($file)]"]
-        + [ (.conflicts // [])[] | "⚠ CONFLICT on \(.scope): " + (.entries | map("#\(.id) \(.entry_type // "note"): \(.summary // "(no summary)")") | join(" ↔ ")) ]
         + [ $claims[] | "⚠ \(.agent_id) has \"\(.scope)\" claimed (\(.scope_type))" ]
         + [ $entries[] | "• [\(.entry_type // "note")\(if .stale then " ⚠ stale" else "" end)] \(.summary // "(no summary)") (id:\(.id))" ]
         + ["Full details: agent-board get_entry(id)."]
