@@ -42,22 +42,31 @@ export function scopeMatchDepth(scope: string, file: string): number {
 /**
  * Depth of a scope match that counts for the caller, or 0. Within the
  * caller's own project any match counts. Another project's scopes are
- * relative to that project's checkout, so they only count when the file
- * sits inside a directory named for that project (its id or a registered
- * repo path) at or before where the match starts; otherwise its "src/db"
- * would match every repo's "src/db".
+ * relative to that project's checkout, so its "src/db" must not match every
+ * repo's "src/db". It counts when:
+ *  - the scope names the file (or an ancestor) and a directory named for
+ *    the owning project (its id or a registered repo path) comes before the
+ *    end of the match, i.e. the file sits inside that project; or
+ *  - the file is a relative path under the caller's root and the scope names
+ *    the caller's directory just before it ("agent-board/hooks/x.sh" for
+ *    "hooks/x.sh" in agent-board).
  */
 export function relevantMatchDepth(
   scope: string,
   file: string,
-  opts: { sameProject: boolean; ownerRepoNames: string[] },
+  opts: { sameProject: boolean; ownerRepoNames: string[]; callerRepoNames: string[] },
 ): number {
-  const depth = scopeMatchDepth(scope, file);
-  if (depth === 0 || opts.sameProject) return depth;
   const s = segments(scope);
   const f = segments(file);
-  const anchors = f.flatMap((seg, i) => (opts.ownerRepoNames.includes(seg) ? [i] : []));
-  if (anchors.length === 0) return 0;
-  // The file is inside the owner's checkout if an owner directory comes at or before a match.
-  return runStarts(f, s).some((start) => anchors.some((a) => a <= start)) ? depth : 0;
+  if (s.length === 0 || f.length === 0) return 0;
+  const forward = runStarts(f, s);
+  const reverse = forward.length > 0 ? [] : runStarts(s, f);
+  const depth = forward.length > 0 ? s.length : reverse.length > 0 ? f.length : 0;
+  if (depth === 0 || opts.sameProject) return depth;
+
+  if (forward.length > 0) {
+    const anchors = f.flatMap((seg, i) => (opts.ownerRepoNames.includes(seg) ? [i] : []));
+    return forward.some((start) => anchors.some((a) => a < start + s.length - 1)) ? depth : 0;
+  }
+  return reverse.some((start) => start > 0 && opts.callerRepoNames.includes(s[start - 1])) ? depth : 0;
 }

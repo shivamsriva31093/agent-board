@@ -40,11 +40,11 @@ describe("scopeMatchDepth", () => {
 });
 
 describe("relevantMatchDepth", () => {
-  const other = (ownerRepoNames: string[]) => ({ sameProject: false, ownerRepoNames });
+  const other = (ownerRepoNames: string[], callerRepoNames: string[] = []) => ({ sameProject: false, ownerRepoNames, callerRepoNames });
 
   it("counts any match within the caller's own project", () => {
-    expect(relevantMatchDepth("README.md", "/w/app/README.md", { sameProject: true, ownerRepoNames: ["app"] })).toBe(1);
-    expect(relevantMatchDepth("src/db", "src/db/queries.ts", { sameProject: true, ownerRepoNames: ["app"] })).toBe(2);
+    expect(relevantMatchDepth("README.md", "/w/app/README.md", { sameProject: true, ownerRepoNames: ["app"], callerRepoNames: ["app"] })).toBe(1);
+    expect(relevantMatchDepth("src/db", "src/db/queries.ts", { sameProject: true, ownerRepoNames: ["app"], callerRepoNames: ["app"] })).toBe(2);
   });
 
   it("ignores another project's generic path when the file isn't inside that project", () => {
@@ -65,5 +65,15 @@ describe("relevantMatchDepth", () => {
 
   it("requires the project directory at or before the match, not after it", () => {
     expect(relevantMatchDepth("src/util", "/w/app/src/util/beta/f.ts", other(["beta"]))).toBe(0);
+  });
+
+  it("counts another project's scope that spells out the file's absolute path", () => {
+    const file = "/Users/dev/code/monorepo/agent-board/src/db/service.ts";
+    expect(relevantMatchDepth(file, file, other(["monorepo"]))).toBe(8);
+  });
+
+  it("counts another project's scope for a relative file when the scope names the caller's directory just before it", () => {
+    expect(relevantMatchDepth("agent-board/hooks/x.sh", "hooks/x.sh", other(["monorepo"], ["agent-board"]))).toBe(2);
+    expect(relevantMatchDepth("acme-api/hooks/x.sh", "hooks/x.sh", other(["monorepo"], ["agent-board"]))).toBe(0);
   });
 });

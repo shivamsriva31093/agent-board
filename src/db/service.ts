@@ -4,7 +4,7 @@ import { getDb } from "@/db/connection";
 import { createQueries, type Queries } from "@/db/queries";
 import { extractSummary, classifyEntryType } from "@/lib/text-processing";
 import { embedText, EMBEDDING_DIM } from "@/lib/embeddings";
-import { relevantMatchDepth } from "@/lib/scope-match";
+import { scopeMatchDepth, relevantMatchDepth } from "@/lib/scope-match";
 import { scoreSignal, rankingWeight, KNOWLEDGE_MIN_SIGNAL } from "@/lib/signal";
 import { distanceToSimilarity } from "@/lib/similarity";
 import { toFtsQuery, fuseRanks } from "@/lib/hybrid";
@@ -295,7 +295,7 @@ export function createService(db: Database.Database) {
       const DEFAULT_TEMPLATE = "working on related stuff in {project} \u2014 {summary}";
 
       try {
-        const related = await this.searchEntries(text.slice(0, 300), 10);
+        const related = await this.searchEntries(text.slice(0, 300), 10, undefined, undefined, { mode: "semantic" });
         const fromOthers = related.filter(
           (e) => e.agent_id !== agentId && e.id !== entryId,
         );
@@ -430,7 +430,7 @@ export function createService(db: Database.Database) {
       try {
         const agentMemory = q.getAgentMemory(agentId);
         if (agentMemory?.knowledge_brief) {
-          const results = await this.searchEntries(agentMemory.knowledge_brief.slice(0, 300), 10);
+          const results = await this.searchEntries(agentMemory.knowledge_brief.slice(0, 300), 10, undefined, undefined, { mode: "semantic" });
 
           const engagedIds = new Set(q.getEngagedEntryIds(agentId));
           const nudgedIds = new Set(q.getNudgedEntryIds(agentId));
@@ -501,6 +501,8 @@ export function createService(db: Database.Database) {
       limit: number = 5,
       project?: string,
       filters?: { type?: string; agent?: string; since?: string },
+      /** "semantic" skips the keyword channel, for callers that search with long prose. */
+      opts: { mode?: "hybrid" | "semantic" } = {},
     ): Promise<EntrySummary[]> {
       // Hybrid search: vector KNN and BM25 over the FTS index, merged by
       // reciprocal-rank fusion, then weighted by signal so status logs sink.
@@ -530,7 +532,7 @@ export function createService(db: Database.Database) {
       }
 
       let lexicalIds: number[] = [];
-      const ftsQuery = toFtsQuery(query);
+      const ftsQuery = opts.mode === "semantic" ? "" : toFtsQuery(query);
       if (ftsQuery) {
         try {
           lexicalIds = (
@@ -645,7 +647,11 @@ export function createService(db: Database.Database) {
       files: string[];
       intent: string;
       maxTokens?: number;
-      /** Caller's project or repo directory name; single-segment scope matches only count within it. */
+      /**
+       * Caller's project or repo directory name. With it, another project's
+       * scopes only match files inside that project; without it, any match of
+       * two or more path segments counts.
+       */
       project?: string;
     }): Promise<{
       entries: (EntrySummary & { score: number; stale?: boolean; superseded_by?: number })[];
@@ -664,10 +670,23 @@ export function createService(db: Database.Database) {
         : undefined;
       // A project's directory names: its id plus registered repo paths.
       const repoNames = new Map(q.getAllProjects().map((p) => [p.id, [p.id, ...p.repo_paths]]));
+      const callerRepoNames = project ? (repoNames.get(project) ?? [project]) : [];
       const fileMatchDepth = (scope: string, ownerProject: string): number => {
-        const opts = { sameProject: ownerProject === project, ownerRepoNames: repoNames.get(ownerProject) ?? [ownerProject] };
         let best = 0;
-        for (const file of params.files) best = Math.max(best, relevantMatchDepth(scope, file, opts));
+        for (const file of params.files) {
+          if (!project) {
+            // Caller didn't say which project it is: keep the older rule.
+            const depth = scopeMatchDepth(scope, file);
+            if (depth >= 2) best = Math.max(best, depth);
+            continue;
+          }
+          const opts = {
+            sameProject: ownerProject === project,
+            ownerRepoNames: repoNames.get(ownerProject) ?? [ownerProject],
+            callerRepoNames,
+          };
+          best = Math.max(best, relevantMatchDepth(scope, file, opts));
+        }
         return best;
       };
 
@@ -819,19 +838,10 @@ export function createService(db: Database.Database) {
         entries: entries.sort((a, b) => a.created_at - b.created_at),
       }));
 
-      // 4. Fetch claims overlapping input files: the original prefix/fuzzy
-      //    rules plus segment matching, so relative claims match absolute paths.
-      const claimSet = new Map<number, ClaimWithAgent>();
-      for (const file of params.files) {
-        const fileClaims = q.getClaimsByScope(file, ts);
-        for (const c of fileClaims) {
-          claimSet.set(c.id, c);
-        }
-      }
-      for (const c of q.getActiveClaims(ts)) {
-        if (fileMatchDepth(c.scope, c.agent.project) > 0) claimSet.set(c.id, c);
-      }
-      const claims = Array.from(claimSet.values());
+      // 4. Claims overlapping input files, matched by the same rules as entries.
+      const claims: ClaimWithAgent[] = q
+        .getActiveClaims(ts)
+        .filter((c) => fileMatchDepth(c.scope, c.agent.project) > 0);
 
       // 4b. Fetch relevant syntheses for the queried files
       const entryTags = new Set<string>();
@@ -895,7 +905,7 @@ export function createService(db: Database.Database) {
       }
 
       // 2. Semantic search
-      const related = await this.searchEntries(context, 20);
+      const related = await this.searchEntries(context, 20, undefined, undefined, { mode: "semantic" });
 
       // 3. Get exclusion sets
       const engagedIds = new Set(q.getEngagedEntryIds(agentId));

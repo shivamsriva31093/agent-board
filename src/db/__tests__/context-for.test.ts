@@ -158,6 +158,26 @@ describe("contextFor scope matching", () => {
     expect(result.entries.map((e) => e.id)).toEqual([id]);
   });
 
+  it("finds a parent project's post for a relative file inside the caller's directory", async () => {
+    const id = await post("monorepo", "The pre-edit hook must exit 0 because Claude Code treats other codes as errors.", ["agent-board/hooks/pre-edit-context.sh"]);
+
+    const result = await svc.contextFor({ files: ["hooks/pre-edit-context.sh"], intent: "", project: "agent-board" });
+
+    expect(result.entries.map((e) => e.id)).toEqual([id]);
+  });
+
+  it("keeps other projects' claims on generic paths out, for absolute and relative files", async () => {
+    svc.createClaim("brandkit-api/main-1", "brandkit-api", "src/db", "area", 60);
+    svc.createClaim("brandkit-api/main-2", "brandkit-api", "src/db/", "module", 60);
+    svc.createClaim("brandkit-api/main-3", "brandkit-api", "src/db/queries.ts", "file", 60);
+    svc.createClaim("agent-board-oss/main-4", "agent-board-oss", "src/db/", "module", 60);
+
+    for (const file of ["/Users/dev/code/agent-board-oss/src/db/queries.ts", "src/db/queries.ts"]) {
+      const result = await svc.contextFor({ files: [file], intent: "", project: "agent-board-oss" });
+      expect(result.claims.map((c) => c.agent_id)).toEqual(["agent-board-oss/main-4"]);
+    }
+  });
+
   it("stores the signal score on new posts", async () => {
     const id = await post("acme-api", "WIP on the dashboard");
     expect(q.getEntry(id)!.signal).toBeCloseTo(0.3, 5);

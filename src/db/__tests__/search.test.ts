@@ -62,6 +62,20 @@ describe("searchEntries (hybrid)", () => {
     expect(results[0]?.id).toBe(target);
   });
 
+  it("semantic mode leaves out keyword-only matches, for callers that search with long prose", async () => {
+    await post("Moved the CI cache key to the lockfile hash because branch keys always missed.");
+    await settle();
+    const lexicalOnly = Number(
+      db
+        .prepare("INSERT INTO entries (agent_id, text, summary, created_at) VALUES ('acme-api/main-a1', ?, ?, unixepoch())")
+        .run("Webhook retries are deduplicated by event id.", "Webhook retries are deduplicated by event id.").lastInsertRowid,
+    );
+
+    const results = await svc.searchEntries("webhook retries deduplicated", 5, undefined, undefined, { mode: "semantic" });
+
+    expect(results.map((r) => r.id)).not.toContain(lexicalOnly);
+  });
+
   it("still ranks a status log below the post that explains the same thing", async () => {
     const log = await post("Shipped Task 2 of the worker pool plan.");
     const why = await post("Fixed a race in the worker pool because the lock release was never awaited by callers.");
