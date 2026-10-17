@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
+import { renderBrief, renderContext, renderSearch, timeAgo } from "./render.js";
 import { copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -46,16 +47,6 @@ async function boardGet(path) {
         throw new Error(`Board API ${path} returned ${res.status}: ${text}`);
     }
     return res.json();
-}
-function timeAgo(unixSeconds) {
-    const diff = Math.floor(Date.now() / 1000) - unixSeconds;
-    if (diff < 60)
-        return `${diff}s ago`;
-    if (diff < 3600)
-        return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400)
-        return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
 }
 // ---------------------------------------------------------------------------
 // MCP Server
@@ -343,51 +334,7 @@ server.tool("brief_me", "Get a compact briefing: project stats, active agents, p
         if (max_tokens !== undefined)
             params.set("max_tokens", String(max_tokens));
         const brief = await boardGet(`/api/brief?${params}`);
-        // Render stats line
-        const stats = brief.stats ?? [];
-        const totalPosts = stats.reduce((s, p) => s + p.total, 0);
-        const statsLine = stats
-            .map((s) => s.today > 0 ? `${s.project}: ${s.total} (${s.today} today)` : `${s.project}: ${s.total}`)
-            .join(" \u2022 ");
-        let output = `\u{1F4CB} ${totalPosts} posts | ${statsLine}\n`;
-        // Active agents + claims
-        const activeParts = [];
-        for (const a of brief.active_agents ?? []) {
-            const task = a.current_task ? ` \u2014 "${a.current_task}"` : "";
-            activeParts.push(`${a.id}${task}`);
-        }
-        for (const c of brief.active_claims ?? []) {
-            activeParts.push(`\u{1F512} ${c.scope} \u2014 ${c.agent_id} (${c.expires_in_minutes}m)`);
-        }
-        if (activeParts.length > 0) {
-            output += `\nActive: ${activeParts.join(" | ")}\n`;
-        }
-        // In your projects
-        if (brief.in_your_projects?.length > 0) {
-            output += `\n\u{1F4CC} In your projects:\n`;
-            brief.in_your_projects.forEach((e, i) => {
-                output += `${i + 1}. @${e.agent_id}: ${e.summary} (${e.project}, ${timeAgo(e.created_at)}) #${e.id}\n`;
-            });
-        }
-        // Mentions section
-        if (brief.mentions && brief.mentions.length > 0) {
-            output += "\n\u{1F4E2} Mentions from other projects:\n";
-            for (const m of brief.mentions) {
-                const ago = timeAgo(m.created_at);
-                const type = m.entry_type ? ` [${m.entry_type}]` : "";
-                output += `  [#${m.id}]${type} ${m.project}: "${m.summary}" (${ago})\n`;
-            }
-        }
-        // Relevant to you
-        if (brief.relevant_to_you?.length > 0) {
-            output += `\n\u{1F4A1} Relevant to you:\n`;
-            brief.relevant_to_you.forEach((e, i) => {
-                output += `${i + 1}. ${e.summary} (${e.project}, ${timeAgo(e.created_at)}) #${e.id}\n`;
-            });
-        }
-        if (!brief.stats?.length && !brief.active_agents?.length) {
-            output += "No recent activity.";
-        }
+        const output = renderBrief(brief, { project, maxTokens: max_tokens ?? 500 });
         return { content: [{ type: "text", text: output }] };
     }
     catch (err) {
@@ -414,18 +361,7 @@ server.tool("search", "Semantic search over all entries. Returns summaries ranke
         if (proj)
             params.set("project", proj);
         const results = await boardGet(`/api/entries/search?${params}`);
-        if (!results?.length) {
-            return { content: [{ type: "text", text: `No results for "${query}".` }] };
-        }
-        let output = `\u{1F50D} Results for "${query}" (${results.length} matches):\n\n`;
-        for (const r of results) {
-            const sim = r.similarity ? ` (${Math.round(r.similarity * 100)}% match)` : "";
-            const tags = r.tags?.length ? " " + r.tags.map((t) => `#${t}`).join(" ") : "";
-            const type = r.entry_type ? `${r.entry_type} ` : "";
-            output += `[#${r.id}] ${type}by ${r.agent_id} (${timeAgo(r.created_at)}, \u2665${r.likes})${sim}\n`;
-            output += `  \u2192 ${r.summary || "(no summary)"}${tags}\n\n`;
-        }
-        output += "Use get_entry(id) for full details.";
+        const output = renderSearch(query, results);
         return { content: [{ type: "text", text: output }] };
     }
     catch (err) {
@@ -706,59 +642,9 @@ server.tool("context_for", "Get relevant knowledge, active claims, and conflicts
         if (max_tokens !== undefined)
             params.set("max_tokens", String(max_tokens));
         const data = (await boardGet(`/api/entries/context?${params}`));
-        const nowSec = Math.floor(Date.now() / 1000);
-        const lines = [];
-        // Syntheses section
-        if (data.syntheses?.length) {
-            lines.push("**Synthesized knowledge:**");
-            for (const s of data.syntheses) {
-                const typeLabel = s.synthesis_type === "decision" ? "\u{1F4CB}" : "\u{1F4A1}";
-                lines.push(`${typeLabel} ${s.topic}: ${s.summary}`);
-            }
-            lines.push("");
-        }
-        // Claims section
-        if (data.claims.length > 0) {
-            lines.push("**Claims:**");
-            for (const c of data.claims) {
-                const minsLeft = Math.max(0, Math.round((c.expires_at - nowSec) / 60));
-                lines.push(`- ${c.agent_id} has "${c.scope}" claimed (${c.scope_type}, ${minsLeft}m left)`);
-            }
-            lines.push("");
-        }
-        // Conflicts section
-        if (data.conflicts?.length > 0) {
-            lines.push("**\u26A0 Potential conflicts:**");
-            for (const c of data.conflicts) {
-                const summaries = c.entries
-                    .map((e) => `#${e.id} (${e.entry_type ?? "note"}, ${timeAgo(e.created_at)}): "${e.summary ?? "(no summary)"}"`)
-                    .join(" \u2194 ");
-                lines.push(`- ${c.scope}: ${summaries}`);
-            }
-            lines.push("\u2192 Use get_entry(id) to understand the full context");
-            lines.push("");
-        }
-        // Entries section
-        if (data.entries.length > 0) {
-            lines.push("**Relevant knowledge:**");
-            data.entries.forEach((e, i) => {
-                const age = timeAgo(e.created_at);
-                const type = e.entry_type ?? "note";
-                const staleLabel = e.stale
-                    ? ` \u26A0 stale${e.superseded_by ? ` \u2192 see #${e.superseded_by}` : ""}`
-                    : "";
-                lines.push(`${i + 1}. [${type}, ${age}${staleLabel}] ${e.summary ?? "(no summary)"} (id:${e.id})`);
-            });
-            lines.push("");
-        }
-        if (data.claims.length === 0 && data.entries.length === 0) {
-            lines.push("No relevant context found for these files.");
-        }
-        if (data.truncated) {
-            lines.push("_(truncated to token budget \u2014 use get_entry for full details)_");
-        }
+        const text = renderContext(data);
         return {
-            content: [{ type: "text", text: lines.join("\n") }],
+            content: [{ type: "text", text }],
         };
     }
     catch (err) {

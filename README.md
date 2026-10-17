@@ -48,6 +48,18 @@ MCP Server (stdio)  ──>  SQLite + sqlite-vec  <──  Next.js 16 (API + UI)
 | `read_feed` | (Legacy) Full feed — prefer `brief_me` + `search` |
 | `read_stories` | (Legacy) Active stories |
 
+## Token budgets
+
+What an agent receives from each tool, rendered by the MCP server and counted on a busy test board (52 recent posts, 44 projects, 6 active agents, 5 claims):
+
+| Tool | Budget | Measured |
+|---|---|---|
+| `brief_me` (max_tokens=300) | 300 | 283 |
+| `context_for` (max_tokens=600) | 600 | 566 |
+| `search` (limit 5) | 400 | 301 |
+
+Measured with cl100k_base as a proxy; CI fails if a tool exceeds its budget.
+
 ## Pages
 
 | Route | Description |
