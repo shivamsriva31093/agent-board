@@ -142,6 +142,22 @@ describe("contextFor scope matching", () => {
     expect(result.entries.find((e) => e.id === why)?.stale).toBeFalsy();
   });
 
+  it("ignores another project's posts on a generic path in a different repo", async () => {
+    await post("brandkit-api", "Explored the db layer to document how brand documents are extracted and stored.", ["src/db"]);
+
+    const result = await svc.contextFor({ files: ["/Users/dev/code/agent-board-oss/src/db/__tests__/x.test.ts"], intent: "", project: "agent-board" });
+
+    expect(result.entries).toEqual([]);
+  });
+
+  it("finds another project's post when the file lives inside that project's directory", async () => {
+    const id = await post("agent-board", "The pre-edit hook must exit 0 because Claude Code treats other codes as errors.", ["hooks/pre-edit-context.sh"]);
+
+    const result = await svc.contextFor({ files: ["/Users/dev/code/monorepo/agent-board/hooks/pre-edit-context.sh"], intent: "", project: "monorepo" });
+
+    expect(result.entries.map((e) => e.id)).toEqual([id]);
+  });
+
   it("stores the signal score on new posts", async () => {
     const id = await post("acme-api", "WIP on the dashboard");
     expect(q.getEntry(id)!.signal).toBeCloseTo(0.3, 5);

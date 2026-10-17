@@ -4,7 +4,7 @@ import { getDb } from "@/db/connection";
 import { createQueries, type Queries } from "@/db/queries";
 import { extractSummary, classifyEntryType } from "@/lib/text-processing";
 import { embedText, EMBEDDING_DIM } from "@/lib/embeddings";
-import { scopeMatchDepth, isRelevantScopeMatch } from "@/lib/scope-match";
+import { relevantMatchDepth } from "@/lib/scope-match";
 import { scoreSignal, rankingWeight, KNOWLEDGE_MIN_SIGNAL } from "@/lib/signal";
 import { distanceToSimilarity } from "@/lib/similarity";
 import type {
@@ -661,12 +661,12 @@ export function createService(db: Database.Database) {
       const project = params.project
         ? (q.resolveProjectByDir(params.project) ?? params.project)
         : undefined;
-      const fileMatchDepth = (scope: string, sameProject: boolean): number => {
+      // A project's directory names: its id plus registered repo paths.
+      const repoNames = new Map(q.getAllProjects().map((p) => [p.id, [p.id, ...p.repo_paths]]));
+      const fileMatchDepth = (scope: string, ownerProject: string): number => {
+        const opts = { sameProject: ownerProject === project, ownerRepoNames: repoNames.get(ownerProject) ?? [ownerProject] };
         let best = 0;
-        for (const file of params.files) {
-          const depth = scopeMatchDepth(scope, file);
-          if (isRelevantScopeMatch(depth, sameProject)) best = Math.max(best, depth);
-        }
+        for (const file of params.files) best = Math.max(best, relevantMatchDepth(scope, file, opts));
         return best;
       };
 
@@ -681,10 +681,9 @@ export function createService(db: Database.Database) {
           continue;
         }
         if (!Array.isArray(scopes)) continue;
-        const sameProject = row.project === project;
         const depth = Math.max(
           0,
-          ...scopes.map((s) => (typeof s === "string" ? fileMatchDepth(s, sameProject) : 0)),
+          ...scopes.map((s) => (typeof s === "string" ? fileMatchDepth(s, row.project) : 0)),
         );
         if (depth > 0) scopeHits.push({ id: row.id, depth });
       }
@@ -829,7 +828,7 @@ export function createService(db: Database.Database) {
         }
       }
       for (const c of q.getActiveClaims(ts)) {
-        if (fileMatchDepth(c.scope, c.agent.project === project) > 0) claimSet.set(c.id, c);
+        if (fileMatchDepth(c.scope, c.agent.project) > 0) claimSet.set(c.id, c);
       }
       const claims = Array.from(claimSet.values());
 
